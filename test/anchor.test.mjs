@@ -94,7 +94,11 @@ const REGION_HTML = `
       <button class="wbIconButton" type="button" aria-label="添加工作区"></button>
     </div>
   </div>
-  <div class="wbListArea"><div class="wbRow">ToolDev</div></div>
+  <div class="wbListArea">
+    <div class="wbGroupRow" data-row-key="workspace:w-tooldev" role="treeitem" aria-expanded="false">ToolDev</div>
+    <div class="wbSessionRow" data-row-key="session:s-quiet">静默的会话</div>
+    <button class="wbOverflow" type="button" data-row-key="overflow:w-tooldev" aria-expanded="false">展开其余 1 个会话</button>
+  </div>
 </div>`
 
 const SIDEBAR_HTML = `
@@ -544,8 +548,82 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.2',
+    'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
+
+  // ── the row context menu ──────────────────────────────────────────────────
+  const openMenu = async (row, x = 120, y = 80) => {
+    await act(async () => {
+      row.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }))
+    })
+    return document.querySelector('[data-drs-menu]')
+  }
+  const groupRow = () => regionList().querySelector('[data-row-key="workspace:w-tooldev"]')
+  const overflow = () => regionList().querySelector('[data-row-key^="overflow:"]')
+  assert.ok(groupRow() !== null && overflow() !== null, 'the shipped list fixture carries the group and its overflow button')
+
+  const openedBeforeMenu = opened.length
+  let menu = await openMenu(rowsIn('recent')[0])
+  assert.ok(menu !== null, 'right-clicking a row opens its context menu')
+  assert.equal(menu.style.left, '120px', 'pinned where the pointer was')
+  assert.equal(menu.style.top, '80px')
+  assert.equal(menu.querySelector('.drs-menu-item').textContent, 'Reveal in workspace', 'holding 定位工作区')
+  assert.equal(opened.length, openedBeforeMenu, 'and the right click does not open the session')
+
+  await act(async () => {
+    document.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }))
+  })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'an outside pointer closes it')
+
+  menu = await openMenu(rowsIn('recent')[0])
+  await act(async () => { document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'Escape closes it')
+
+  // The marquee scrolls the title back on leave; that scroll must not close the menu,
+  // while a real scroll still does — this was the “menu flashes and vanishes” report.
+  menu = await openMenu(rowsIn('recent')[0])
+  await act(async () => { rowsIn('recent')[0].querySelector('.drs-title').dispatchEvent(new window.Event('scroll')) })
+  assert.ok(document.querySelector('[data-drs-menu]') !== null, 'a marquee scroll on the title keeps the menu open')
+  await act(async () => { containerOf('recent').dispatchEvent(new window.Event('scroll')) })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'a real scroll closes it')
+
+  // 定位工作区: the shipped row is scrolled into view and flashed.
+  let scrolled = 0
+  const quietRow = regionList().querySelector('[data-row-key="session:s-quiet"]')
+  quietRow.scrollIntoView = () => { scrolled += 1 }
+  menu = await openMenu(rowsIn('recent')[0])
+  await act(async () => { menu.querySelector('.drs-menu-item').click() })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'the menu closes on the action')
+  assert.equal(quietRow.getAttribute('data-drs-located'), '', 'the shipped row is marked')
+  assert.equal(scrolled, 1, 'and scrolled into view')
+  // The mark is a two-second flash on a real timer, so the test stops at the mark.
+
+  // A row hidden behind a collapsed group (or its watermark) opens both first.
+  let groupClicks = 0
+  let overflowClicks = 0
+  groupRow().addEventListener('click', () => { groupClicks += 1 })
+  overflow().addEventListener('click', () => { overflowClicks += 1 })
+  // 重构编解码器 is pinned by the registry but has no row in the shipped fixture, so
+  // locating it has to open the group and lift the watermark first.
+  const missing = rowsIn('pinned').find(row => row.querySelector('.drs-title').textContent === '重构编解码器')
+  menu = await openMenu(missing)
+  await act(async () => { menu.querySelector('.drs-menu-item').click() })
+  assert.equal(groupClicks, 1, 'a collapsed workspace group is expanded')
+  assert.equal(overflowClicks, 1, 'and the group watermark is lifted')
+
+  // The menu belongs to this plugin's rows only: the shipped 工作区 browser keeps
+  // its own menu, and our section headers are not rows.
+  const shippedRow = regionList().querySelector('[data-row-key="session:s-quiet"]')
+  await act(async () => {
+    shippedRow.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
+  })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'a right-click in the shipped workspace list is left alone')
+  await act(async () => {
+    headIn('recent').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
+  })
+  assert.equal(document.querySelector('[data-drs-menu]'), null, 'and so is a right-click on a section header')
 
   // ── bounded scroll regions ────────────────────────────────────────────────
   assert.equal(containerOf('recent').style.getPropertyValue('--drs-visible-rows'), '5',

@@ -99,7 +99,7 @@
  *
  * Each list is a fixed-height scroll region: `--drs-visible-rows` (5 by default)
  * rows of 最近会话, `--drs-active-rows` (3) rows of 活跃会话 and `--drs-pinned-rows`
- * (4) rows of 置顶对话 are visible, and the rest scroll inside them, so the block
+ * (4) rows of 置顶会话 are visible, and the rest scroll inside them, so the block
  * can never take the sidebar's browsing region away from the workspace list. The
  * regions use the app's own scrollbar skin, and therefore the sidebar's
  * quiet-bars rule too.
@@ -197,6 +197,20 @@ window.__ModuleLoader__.load({
 		/** The fold affordance this plugin inserts into that header. */
 		const FOLD_CLASS = 'drs-ws-fold';
 
+		/** Marks a shipped 工作区 row this plugin just located, for the flash. */
+		const LOCATED_ATTR = 'data-drs-located';
+
+		/** How long the located row stays marked. */
+		const LOCATED_MS = 2000;
+
+		/**
+		 * Carries the session id on this plugin's own rows. The context menu is bound on
+		 * the document at the capture phase and only acts on a target inside this
+		 * plugin's containers, so a right-click anywhere in the shipped 工作区 browser —
+		 * or anywhere else in the app — is left completely alone.
+		 */
+		const ROW_ATTR = 'data-drs-row-id';
+
 		/** `localStorage` key holding every preference this plugin owns. */
 		const PREFS_KEY = 'dsh-recent-sessions';
 
@@ -246,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.7.0';
+		const BUILD = 'recent-sessions/0.8.2';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -256,15 +270,17 @@ window.__ModuleLoader__.load({
 			'active.title': '活跃会话',
 			'active.collapse': '收起活跃会话',
 			'active.expand': '展开活跃会话',
-			'pin.title': '置顶对话',
-			'pin.collapse': '收起置顶对话',
-			'pin.expand': '展开置顶对话',
+			'pin.title': '置顶会话',
+			'pin.collapse': '收起置顶会话',
+			'pin.expand': '展开置顶会话',
 			'settings.label': '侧栏会话分区',
 			'settings.hint': '这些分区排在侧栏「工作区」下方；关掉哪一个，它就整段从侧栏移除，随时可以再打开。',
 			'settings.workspaces': '工作区',
 			'settings.show': '显示',
 			'settings.linger': '活跃会话里已完成的行再保留',
 			'settings.seconds': '秒',
+			'settings.version': '版本 {version}',
+			'menu.reveal': '定位工作区',
 			'running': '进行中',
 			'running.subagents.one': '{n} 个子智能体运行中',
 			'running.subagents.other': '{n} 个子智能体运行中',
@@ -308,6 +324,8 @@ window.__ModuleLoader__.load({
 			'settings.show': 'Show',
 			'settings.linger': 'Keep finished rows in Active for another',
 			'settings.seconds': 's',
+			'settings.version': 'Version {version}',
+			'menu.reveal': 'Reveal in workspace',
 			'running': 'Running',
 			'running.subagents.one': '{n} subagent running',
 			'running.subagents.other': '{n} subagents running',
@@ -443,6 +461,22 @@ window.__ModuleLoader__.load({
 			'.drs-settings-number{box-sizing:border-box;width:76px;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:20px;text-align:center;outline:none}',
 			'.drs-settings-number:focus{border-color:var(--dsw-alias-state-business-primary)}',
 			'.drs-settings-unit{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
+			'.drs-settings-version{margin:14px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
+			// The row context menu. Sized off the shipped menus' own rules — panel
+			// `padding:4px`, row `padding:5px 7px` with `gap:6px`, `radius-md` rows in a
+			// `radius-lg` frame — so it reads at the same scale as the app's row menu.
+			// The surface is *solid* (measured off the shipped menu, #2b2c30..#313132)
+			// because the shipped translucency leans on a backdrop blur that a panel
+			// portaled outside the app's stacking context never receives.
+			'.drs-menu{position:fixed;z-index:1100;box-sizing:border-box;min-width:196px;padding:4px;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-bg-layer-2,var(--dsw-specific-menu,#2c2c2e));--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-primary);animation:drs-fade-in .12s ease-out}',
+			'.drs-menu-item{display:flex;align-items:center;gap:6px;width:100%;min-height:30px;padding:5px 7px;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:inherit;font:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}',
+			'.drs-menu-item:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+			'.drs-menu-item:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}',
+			'.drs-menu-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:var(--dsw-alias-label-secondary)}',
+			'.drs-menu-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+			'.drs-menu-hint{flex:none;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;letter-spacing:.2px}',
+			// The flashed row in the shipped 工作区 list, after 定位工作区.
+			'[' + LOCATED_ATTR + ']{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;border-radius:var(--dsw-radius-md,8px)}',
 			// The dialog field is the shipped rename dialog's own: full width, transparent,
 			// a hairline border and a 44px row — not the row-sized field of the list.
 			'.drs-rename-dialog{box-sizing:border-box;width:100%;height:44px;padding:7px 14px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg,12px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;font-weight:400;line-height:22px;outline:none}',
@@ -586,6 +620,8 @@ window.__ModuleLoader__.load({
 		const StateDot = primitive('StateDot');
 		const HoverCard = primitive('HoverCard');
 		const Switch = primitive('Switch');
+		/** The menu glyph: a Workspace folder reads as “where this session lives”. */
+		const MenuIcon = primitive('IconFolderOutlineRegular', 'IconBrowseOutlineRegular', 'IconSearchOutlineRegular');
 
 		/** Localized trailing timestamp, matching the workspace rows' vocabulary. */
 		function timeLabel(updatedAt, now, t) {
@@ -949,6 +985,59 @@ window.__ModuleLoader__.load({
 				return child;
 			}
 			return null;
+		}
+
+		/**
+		 * Locate a session in the shipped 工作区 browser: unfold the region if this
+		 * plugin folded it, expand the groups and the watermarked tails that could be
+		 * hiding the row, then scroll it into view and flash it. Everything is found by
+		 * `data-row-key` — the shipped rows carry `session:<id>`, their groups
+		 * `workspace:<key>` and their “expand the rest” buttons `overflow:<key>` — so
+		 * no hashed class name is involved.
+		 * @param sessionId - the session to locate.
+		 * @returns whether a row was found.
+		 */
+		function revealInWorkspace(sessionId) {
+			const region = workspaceRegion();
+			if (region === null || region.list === null) return false;
+			// This plugin's own fold is a preference, so unfolding it is a write.
+			if (readPrefs().workspacesCollapsed === true) writePrefs({ workspacesCollapsed: false });
+			if (region.list.style.display === 'none') region.list.style.display = '';
+			const key = 'session:' + sessionId;
+			const mark = (row) => {
+				if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+				row.setAttribute(LOCATED_ATTR, '');
+				window.setTimeout(() => { row.removeAttribute(LOCATED_ATTR) }, LOCATED_MS);
+				if (typeof row.focus === 'function') row.focus({ preventScroll: true });
+			};
+			const found = region.list.querySelector('[data-row-key="' + key + '"]');
+			if (found !== null) {
+				mark(found);
+				return true;
+			}
+			// The row is behind a collapsed group or a group's own watermark: open both,
+			// then look again once React has committed the extra rows.
+			for (const group of region.list.querySelectorAll('[data-row-key^="workspace:"][aria-expanded="false"]')) {
+				if (typeof group.click === 'function') group.click();
+			}
+			for (const overflow of region.list.querySelectorAll('[data-row-key^="overflow:"]')) {
+				if (overflow.getAttribute('aria-expanded') === 'true') continue;
+				if (typeof overflow.click === 'function') overflow.click();
+			}
+			let attempts = 0;
+			const retry = () => {
+				const row = region.list.querySelector('[data-row-key="' + key + '"]');
+				if (row !== null) {
+					mark(row);
+					return;
+				}
+				attempts += 1;
+				if (attempts < 4 && typeof window.requestAnimationFrame === 'function') {
+					window.requestAnimationFrame(retry);
+				}
+			};
+			if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(retry);
+			return true;
 		}
 
 		/** The chevron the fold button draws: right when folded, down when open. */
@@ -1567,7 +1656,7 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * The 置顶对话 list: every listed session the Workspace registry holds in
+		 * The 置顶会话 list: every listed session the Workspace registry holds in
 		 * `pinnedSessionIds`, newest first. A pinned session stays in 最近会话 too —
 		 * pinning marks a session as worth keeping at hand, it does not move it — and
 		 * an id the registry no longer lists (archived, blank, subagent) is dropped
@@ -1742,6 +1831,10 @@ window.__ModuleLoader__.load({
 			const row = h('button', {
 				type: 'button',
 				className,
+				// The document-level capture listener in the seat finds the row from this
+				// attribute, so the menu works even if some layer above swallows the
+				// bubbling contextmenu event, and never fires outside this plugin's rows.
+				[ROW_ATTR]: facts.id,
 				'aria-current': facts.current ? 'true' : undefined,
 				onPointerEnter: marquee.enter,
 				onPointerLeave: marquee.leave,
@@ -1877,6 +1970,66 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * A row's context menu: this plugin's own markup, pinned at the pointer and
+		 * portaled to the body so no sidebar overflow can clip it. It closes on Escape,
+		 * on an outside pointer, and on a scroll. One item today — 定位工作区 — and the
+		 * list is what further row actions append to.
+		 * @param props - the menu's request, the translator, and the close/reveal hops.
+		 * @returns the menu.
+		 */
+		function RowMenu(props) {
+			const { menu, t, onClose, onReveal } = props;
+			React.useEffect(() => {
+				const onPointerDown = (event) => {
+					const target = event.target;
+					if (target !== null && typeof target.closest === 'function' && target.closest('[data-drs-menu]') !== null) return;
+					onClose();
+				};
+				const onKeyDown = (event) => { if (event.key === 'Escape') onClose() };
+				// A scroll closes the menu, but not the ones this plugin's own marquee
+				// causes: leaving a row scrolls its title back to the start, and that
+				// scroll event would otherwise close the menu the instant it opened.
+				const onScroll = (event) => {
+					const target = event.target;
+					if (target !== null && typeof target.closest === 'function' && target.closest('.drs-title') !== null) return;
+					onClose();
+				};
+				document.addEventListener('pointerdown', onPointerDown, true);
+				document.addEventListener('keydown', onKeyDown, true);
+				window.addEventListener('scroll', onScroll, true);
+				window.addEventListener('resize', onClose);
+				return () => {
+					document.removeEventListener('pointerdown', onPointerDown, true);
+					document.removeEventListener('keydown', onKeyDown, true);
+					window.removeEventListener('scroll', onScroll, true);
+					window.removeEventListener('resize', onClose);
+				};
+			}, [onClose]);
+			// Keep the panel inside the window when the click was near an edge.
+			const left = Math.max(4, Math.min(menu.x, window.innerWidth - 208));
+			const top = Math.max(4, Math.min(menu.y, window.innerHeight - 52));
+			return ReactDOM.createPortal(h('div', {
+				className: 'drs-menu',
+				'data-drs-menu': '',
+				role: 'menu',
+				style: { left: left + 'px', top: top + 'px' },
+			}, h('button', {
+				type: 'button',
+				className: 'drs-menu-item',
+				role: 'menuitem',
+				onClick: () => {
+					onReveal(menu.id);
+					onClose();
+				},
+			}, [
+				MenuIcon === null
+					? null
+					: h('span', { className: 'drs-menu-icon', key: 'icon' }, h(MenuIcon, { size: 16 })),
+				h('span', { className: 'drs-menu-label', key: 'label' }, t('menu.reveal')),
+			])), document.body);
+		}
+
+		/**
 		 * One section header, in the shipped 工作区 header's own style: the label,
 		 * the active count where there is one, and the chevron that folds the body
 		 * away. The header is itself the button — the whole row is the hit target,
@@ -1972,6 +2125,9 @@ window.__ModuleLoader__.load({
 						h('span', { className: 'drs-settings-unit', key: 'unit' }, t('settings.seconds')),
 					]),
 				]),
+				// Which build is live, so a page that kept an old bundle is obvious.
+				h('p', { className: 'drs-settings-version', key: 'version' },
+					t('settings.version', { version: BUILD.replace('recent-sessions/', '') })),
 			]);
 		}
 
@@ -2001,6 +2157,27 @@ window.__ModuleLoader__.load({
 			const containers = useContainers(!wide, order.join(','), windows, prefs.hidden ?? clampHidden(undefined));
 			// The rename dialog's request: one at a time.
 			const [renameRequest, setRenameRequest] = React.useState(null);
+			// The row context menu, pinned where the right-click landed.
+			const [rowMenu, setRowMenu] = React.useState(null);
+			// Bound once, at the capture phase, so no layer above can swallow the event:
+			// a right-click only acts when its target is one of this plugin's own rows,
+			// which keeps the shipped 工作区 browser's own menu untouched.
+			React.useEffect(() => {
+				const onContextMenu = (event) => {
+					const target = event.target;
+					if (target === null || typeof target.closest !== 'function') return;
+					const row = target.closest('[' + ROW_ATTR + ']');
+					if (row === null) return;
+					if (row.closest('[' + CONTAINER_ATTR + ']') === null) return;
+					event.preventDefault();
+					event.stopPropagation();
+					setRowMenu({ id: row.getAttribute(ROW_ATTR), x: event.clientX, y: event.clientY });
+				};
+				// `window` capture is the earliest point an event can be seen, so nothing
+				// the app binds on document/body can swallow the right-click first.
+				window.addEventListener('contextmenu', onContextMenu, true);
+				return () => { window.removeEventListener('contextmenu', onContextMenu, true) };
+			}, []);
 			const now = useClock(wide);
 			// Sections the user hid in Settings; `hidden` is the stored map.
 			const hiddenSections = prefs.hidden ?? clampHidden(undefined);
@@ -2090,6 +2267,15 @@ window.__ModuleLoader__.load({
 					t,
 					onClose: () => { setRenameRequest(null) },
 					onRename: props.renameSession,
+				}));
+			}
+			if (rowMenu !== null) {
+				portals.push(h(RowMenu, {
+					key: 'menu',
+					menu: rowMenu,
+					t,
+					onClose: () => { setRowMenu(null) },
+					onReveal: (id) => { revealInWorkspace(id) },
 				}));
 			}
 			return portals;
@@ -2183,7 +2369,7 @@ window.__ModuleLoader__.load({
 					collapseActive: (flag) => { writePrefs({ activeCollapsed: flag === true }) },
 					/** Pinned rows shown before that list scrolls (persisted); clamps to {@link MIN_VISIBLE}..{@link MAX_VISIBLE}. */
 					pinnedView: (n) => { writePrefs({ pinnedVisible: clampPinnedVisible(n) }) },
-					/** Fold or unfold the 置顶对话 section (persisted). */
+					/** Fold or unfold the 置顶会话 section (persisted). */
 					collapsePinned: (flag) => { writePrefs({ pinnedCollapsed: flag === true }) },
 					/** How long a row lingers in 活跃会话, in seconds (persisted); clamps to 0..{@link MAX_LINGER_SECONDS}. */
 					linger: (seconds) => { writePrefs({ lingerSeconds: clampLinger(seconds) }) },
