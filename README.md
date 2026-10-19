@@ -7,8 +7,8 @@ DeepSeek Harness Web 侧边栏的会话快捷区。
 ## 安装
 
 ```sh
-# desktop = 你的 profile 名（桌面端是 desktop，`dsh web` 是 web）
-dsh plugin --profile desktop add @zimzaza4/dsh-recent-sessions
+# <profile> 换成目标 profile 名
+dsh plugin --profile <profile> add @zimzaza4/dsh-recent-sessions
 ```
 
 装完重启 DSH。
@@ -16,7 +16,7 @@ dsh plugin --profile desktop add @zimzaza4/dsh-recent-sessions
 卸载：
 
 ```sh
-dsh plugin --profile desktop remove @zimzaza4/dsh-recent-sessions
+dsh plugin --profile <profile> remove @zimzaza4/dsh-recent-sessions
 ```
 
 ## 行为
