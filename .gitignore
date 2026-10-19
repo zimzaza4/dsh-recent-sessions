@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+
+# 本机一次性测量脚本（依赖 Pillow 与截图），不进仓库
+test/measure-gap.py

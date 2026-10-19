@@ -1,0 +1,10 @@
+# Bundle patch for @local/dsh-recent-sessions (declared via package.json
+# dsh.bundle.patch).
+#
+# The feature is entirely browser-side: the recent-session block is rendered by
+# `client.js`, which the Client module table loads because `package.json`
+# declares `dsh.client{ platform: 'web' }`. This row exists so the bundle has a
+# Host-side identity the profile can install, enable, and disable.
+- insert:
+    - id: recent-sessions
+      name: '@local/dsh-recent-sessions'
