@@ -6,17 +6,17 @@ DeepSeek Harness Web 侧边栏的会话快捷区。
 
 ## 安装
 
-本插件是 profile bundle：
-
 ```sh
-dsh plugin install link:<本仓库路径>
+dsh plugin --profile <profile> add @zimzaza4/dsh-recent-sessions
 ```
 
-或手动：在 `<DSH_HOME>/profiles/<profile>/package.json` 的 `dependencies` 里加
-`"@local/dsh-recent-sessions": "link:<本仓库路径>"`，并在 `dsh.profile.bundles` 里加上
-`"@local/dsh-recent-sessions"`，然后在该 profile 目录执行 `pnpm install`。
+装完重启 DSH。
 
-装完重启 DSH。卸载走 **设置 → 插件** 里禁用该 bundle。
+卸载：
+
+```sh
+dsh plugin --profile <profile> remove @zimzaza4/dsh-recent-sessions
+```
 
 ## 行为
 
@@ -27,16 +27,14 @@ dsh plugin install link:<本仓库路径>
 
 ## 开发
 
-插件本身零依赖；测试借用相邻的 `node_modules` 里的 react / jsdom：
+插件本身零依赖；测试借用相邻 `node_modules` 里的 react / jsdom：
 
 ```sh
 DRS_TEST_NODE_MODULES=<含 react 与 jsdom 的 node_modules> node test/anchor.test.mjs
 ```
 
-`test/measure-gap.py` 是量截图中行间距的一次性小工具，需要 Pillow。
-
 设计细节与全部实现取舍见 [DESIGN.md](DESIGN.md)。
 
 ## License
 
-UNLICENSED（私有）。
+GPL-3.0-only，见 [LICENSE](LICENSE)。

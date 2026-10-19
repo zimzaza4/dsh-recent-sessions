@@ -269,7 +269,7 @@ async function scenario(label, primitives) {
   window.__ModuleLoader__ = { load: (value) => { definition = value } }
   // The module body only touches page globals, which are installed above.
   new Function(clientSource)()
-  assert.equal(definition.id, '@local/dsh-recent-sessions', 'module id')
+  assert.equal(definition.id, '@zimzaza4/dsh-recent-sessions', 'module id')
 
   const plugin = definition.factory((specifier) => {
     if (specifier === 'react') return React
@@ -324,7 +324,7 @@ async function scenario(label, primitives) {
   assert.ok(sidebarSeat !== undefined, 'the block rides the additive footer seat')
   assert.equal(sidebarSeat.options.locale, 'recentSessions', 'and owns its copy namespace')
   assert.ok(settingsSeat !== undefined, 'the settings page registers into settings.section')
-  assert.equal(settingsSeat.options.id, '@local/dsh-recent-sessions', 'under this plugin id')
+  assert.equal(settingsSeat.options.id, '@zimzaza4/dsh-recent-sessions', 'under this plugin id')
   const { options, Component } = sidebarSeat
   const Settings = settingsSeat.Component
   const injected = options.inject()

@@ -1,4 +1,4 @@
-# @local/dsh-recent-sessions
+# @zimzaza4/dsh-recent-sessions
 
 最近使用的会话，紧跟侧边栏自带的 **工作区** 区块下方：单行列表、限定高度、可滚动，风格与工作区列表一致，并标出每个会话所属的工作区。其下还有 **活跃会话** 区块，只放此刻值得看一眼的会话，按“要你处理的 → 你没看的完成 → 正在工作的”排序。顺带给 **工作区** 区块本体加了个折叠开关。
 
@@ -93,8 +93,8 @@ or by hand — add the dependency and the bundle row:
 ```jsonc
 // <DSH_HOME>/profiles/<profile>/package.json
 {
-  "dependencies": { "@local/dsh-recent-sessions": "link:<本仓库路径>" },
-  "dsh": { "profile": { "bundles": [ /* …, */ "@local/dsh-recent-sessions" ] } }
+  "dependencies": { "@zimzaza4/dsh-recent-sessions": "link:<本仓库路径>" },
+  "dsh": { "profile": { "bundles": [ /* …, */ "@zimzaza4/dsh-recent-sessions" ] } }
 }
 ```
 

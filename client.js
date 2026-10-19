@@ -1,5 +1,5 @@
 /**
- * Browser half of @local/dsh-recent-sessions.
+ * Browser half of @zimzaza4/dsh-recent-sessions.
  *
  * A "最近会话" (recent sessions) block in the Web sidebar: the sessions the user
  * most recently worked in, drawn in the workspace list's own style, placed in
@@ -109,7 +109,7 @@
  * exposes them for hand tuning without a rebuild.
  */
 window.__ModuleLoader__.load({
-	id: '@local/dsh-recent-sessions',
+	id: '@zimzaza4/dsh-recent-sessions',
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -131,7 +131,7 @@ window.__ModuleLoader__.load({
 		}
 
 		const h = React.createElement;
-		const PLUGIN_ID = '@local/dsh-recent-sessions';
+		const PLUGIN_ID = '@zimzaza4/dsh-recent-sessions';
 
 		/** Additive sidebar seat this plugin rides; its occupant renders null. */
 		const SEAT = 'sidebar.footer.action';

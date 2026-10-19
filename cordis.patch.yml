@@ -1,4 +1,4 @@
-# Bundle patch for @local/dsh-recent-sessions (declared via package.json
+# Bundle patch for @zimzaza4/dsh-recent-sessions (declared via package.json
 # dsh.bundle.patch).
 #
 # The feature is entirely browser-side: the recent-session block is rendered by
@@ -7,4 +7,4 @@
 # Host-side identity the profile can install, enable, and disable.
 - insert:
     - id: recent-sessions
-      name: '@local/dsh-recent-sessions'
+      name: '@zimzaza4/dsh-recent-sessions'
