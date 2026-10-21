@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.2';
+		const BUILD = 'recent-sessions/0.8.3';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -281,6 +281,8 @@ window.__ModuleLoader__.load({
 			'settings.seconds': '秒',
 			'settings.version': '版本 {version}',
 			'menu.reveal': '定位工作区',
+			'menu.pin': '置顶会话',
+			'menu.unpin': '取消置顶',
 			'running': '进行中',
 			'running.subagents.one': '{n} 个子智能体运行中',
 			'running.subagents.other': '{n} 个子智能体运行中',
@@ -326,6 +328,8 @@ window.__ModuleLoader__.load({
 			'settings.seconds': 's',
 			'settings.version': 'Version {version}',
 			'menu.reveal': 'Reveal in workspace',
+			'menu.pin': 'Pin session',
+			'menu.unpin': 'Unpin session',
 			'running': 'Running',
 			'running.subagents.one': '{n} subagent running',
 			'running.subagents.other': '{n} subagents running',
@@ -622,6 +626,8 @@ window.__ModuleLoader__.load({
 		const Switch = primitive('Switch');
 		/** The menu glyph: a Workspace folder reads as “where this session lives”. */
 		const MenuIcon = primitive('IconFolderOutlineRegular', 'IconBrowseOutlineRegular', 'IconSearchOutlineRegular');
+		/** The pin glyph, the same one the shipped pin indicator draws. */
+		const PinIcon = primitive('IconPinOutlineRegular', 'IconPinFillRegular');
 
 		/** Localized trailing timestamp, matching the workspace rows' vocabulary. */
 		function timeLabel(updatedAt, now, t) {
@@ -1972,13 +1978,13 @@ window.__ModuleLoader__.load({
 		/**
 		 * A row's context menu: this plugin's own markup, pinned at the pointer and
 		 * portaled to the body so no sidebar overflow can clip it. It closes on Escape,
-		 * on an outside pointer, and on a scroll. One item today — 定位工作区 — and the
-		 * list is what further row actions append to.
-		 * @param props - the menu's request, the translator, and the close/reveal hops.
+		 * on an outside pointer, and on a scroll. Two items — 定位工作区 and the pin
+		 * toggle, which reads 置顶会话 or 取消置顶 depending on where the session stands.
+		 * @param props - the menu's request, the translator, and the action hops.
 		 * @returns the menu.
 		 */
 		function RowMenu(props) {
-			const { menu, t, onClose, onReveal } = props;
+			const { menu, t, onClose, onReveal, onPin, onUnpin } = props;
 			React.useEffect(() => {
 				const onPointerDown = (event) => {
 					const target = event.target;
@@ -2007,26 +2013,44 @@ window.__ModuleLoader__.load({
 			}, [onClose]);
 			// Keep the panel inside the window when the click was near an edge.
 			const left = Math.max(4, Math.min(menu.x, window.innerWidth - 208));
-			const top = Math.max(4, Math.min(menu.y, window.innerHeight - 52));
+			const top = Math.max(4, Math.min(menu.y, window.innerHeight - 84));
+			const entries = [
+				{
+					key: 'reveal',
+					icon: MenuIcon,
+					label: t('menu.reveal'),
+					run: () => { onReveal(menu.id) },
+				},
+				{
+					key: 'pin',
+					icon: PinIcon,
+					label: t(menu.pinned === true ? 'menu.unpin' : 'menu.pin'),
+					run: () => {
+						if (menu.pinned === true) onUnpin(menu.id);
+						else onPin(menu.id);
+					},
+				},
+			];
 			return ReactDOM.createPortal(h('div', {
 				className: 'drs-menu',
 				'data-drs-menu': '',
 				role: 'menu',
 				style: { left: left + 'px', top: top + 'px' },
-			}, h('button', {
+			}, entries.map(entry => h('button', {
+				key: entry.key,
 				type: 'button',
 				className: 'drs-menu-item',
 				role: 'menuitem',
 				onClick: () => {
-					onReveal(menu.id);
+					entry.run();
 					onClose();
 				},
 			}, [
-				MenuIcon === null
+				entry.icon === null
 					? null
-					: h('span', { className: 'drs-menu-icon', key: 'icon' }, h(MenuIcon, { size: 16 })),
-				h('span', { className: 'drs-menu-label', key: 'label' }, t('menu.reveal')),
-			])), document.body);
+					: h('span', { className: 'drs-menu-icon', key: 'icon' }, h(entry.icon, { size: 16 })),
+				h('span', { className: 'drs-menu-label', key: 'label' }, entry.label),
+			]))), document.body);
 		}
 
 		/**
@@ -2162,6 +2186,8 @@ window.__ModuleLoader__.load({
 			// Bound once, at the capture phase, so no layer above can swallow the event:
 			// a right-click only acts when its target is one of this plugin's own rows,
 			// which keeps the shipped 工作区 browser's own menu untouched.
+			const pinnedRef = React.useRef([]);
+			pinnedRef.current = Array.isArray(workspaces?.pinnedSessionIds) ? workspaces.pinnedSessionIds : [];
 			React.useEffect(() => {
 				const onContextMenu = (event) => {
 					const target = event.target;
@@ -2171,7 +2197,13 @@ window.__ModuleLoader__.load({
 					if (row.closest('[' + CONTAINER_ATTR + ']') === null) return;
 					event.preventDefault();
 					event.stopPropagation();
-					setRowMenu({ id: row.getAttribute(ROW_ATTR), x: event.clientX, y: event.clientY });
+					const id = row.getAttribute(ROW_ATTR);
+					setRowMenu({
+						id,
+						x: event.clientX,
+						y: event.clientY,
+						pinned: pinnedRef.current.includes(id),
+					});
 				};
 				// `window` capture is the earliest point an event can be seen, so nothing
 				// the app binds on document/body can swallow the right-click first.
@@ -2276,6 +2308,8 @@ window.__ModuleLoader__.load({
 					t,
 					onClose: () => { setRowMenu(null) },
 					onReveal: (id) => { revealInWorkspace(id) },
+					onPin: (id) => { props.pinSession(id) },
+					onUnpin: (id) => { props.unpinSession(id) },
 				}));
 			}
 			return portals;
@@ -2354,6 +2388,21 @@ window.__ModuleLoader__.load({
 				});
 			};
 
+			/**
+			 * The pin toggle, through the same service the workspace rows use: it
+			 * installs the complete pin set the host replies with, so the new
+			 * 置顶会话 ordering lands without this plugin predicting it. Silent when a
+			 * build stops publishing the service.
+			 * @param pin - `true` to pin, `false` to unpin.
+			 * @returns the hop, resolved once the write settles.
+			 */
+			const setPinned = (pin) => (sessionId) => {
+				const service = resolveService(ctx, 'uiWorkspace');
+				const call = pin ? 'pinSession' : 'unpinSession';
+				if (service === undefined || typeof service[call] !== 'function') return Promise.resolve();
+				return Promise.resolve(service[call](sessionId)).catch(() => {});
+			};
+
 			if (typeof window !== 'undefined') {
 				window.__DSH_RECENT_SESSIONS__ = {
 					version: BUILD,
@@ -2401,7 +2450,12 @@ window.__ModuleLoader__.load({
 					id: PLUGIN_ID,
 					order: 100,
 					locale: NS,
-					inject: () => ({ openSession, renameSession }),
+					inject: () => ({
+						openSession,
+						renameSession,
+						pinSession: setPinned(true),
+						unpinSession: setPinned(false),
+					}),
 				}, RecentSessions)),
 				// The settings page: every switch there writes this plugin's own
 				// preferences, so the sidebar follows it live through PREFS_EVENT.

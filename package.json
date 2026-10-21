@@ -1,6 +1,6 @@
 {
   "name": "@zimzaza4/dsh-recent-sessions",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "type": "module",
   "description": "Pinned, recent and active sessions for the DeepSeek Harness Web sidebar — what the workspace registry pins, the sessions you most recently worked in, and what needs you now (waiting for an answer, freshly finished, or still working), in the workspace-list style under the 工作区 region, which this plugin also makes foldable; the four sections can be dragged into any order, each can be hidden from its own Settings page, a finished row lingers in 活跃会话 for a configurable pause, the rows behave like the shipped ones (hover marquee, hover card, double-click rename) and carry a right-click menu whose 定位工作区 unfolds and flashes the session in the shipped workspace browser",
   "main": "index.js",

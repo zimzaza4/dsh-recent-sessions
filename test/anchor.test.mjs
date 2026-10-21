@@ -297,11 +297,19 @@ async function scenario(label, primitives) {
       return () => {}
     },
   }
+  const pinned = []
+  const unpinned = []
   const ctx = {
     get: (name) => {
       if (name === 'slots') return slots
       if (name === 'locale') return { register: () => () => {} }
-      if (name === 'uiWorkspace') return { openSession: (id) => { opened.push(id) } }
+      if (name === 'uiWorkspace') {
+        return {
+          openSession: (id) => { opened.push(id) },
+          pinSession: (id) => { pinned.push(id); return Promise.resolve({ ok: true }) },
+          unpinSession: (id) => { unpinned.push(id); return Promise.resolve({ ok: true }) },
+        }
+      }
       if (name === 'sessions') {
         // The shipped rename hop: `sessions.using(id, { source }, ref => ref.binding.session.rename(title))`.
         return {
@@ -548,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.2',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.3',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -569,8 +577,24 @@ async function scenario(label, primitives) {
   assert.ok(menu !== null, 'right-clicking a row opens its context menu')
   assert.equal(menu.style.left, '120px', 'pinned where the pointer was')
   assert.equal(menu.style.top, '80px')
-  assert.equal(menu.querySelector('.drs-menu-item').textContent, 'Reveal in workspace', 'holding 定位工作区')
+  const menuItems = [...menu.querySelectorAll('.drs-menu-item')]
+  assert.equal(menuItems.length, 2, 'two row actions')
+  assert.equal(menuItems[0].textContent, 'Reveal in workspace', 'holding 定位工作区')
+  assert.ok(['Pin session', 'Unpin session'].includes(menuItems[1].textContent), 'and a pin toggle')
   assert.equal(opened.length, openedBeforeMenu, 'and the right click does not open the session')
+
+  // The pin toggle writes through uiWorkspace and reads the registry's pin set.
+  const unpinnedRow = rowsIn('recent').find(row => row.getAttribute('data-drs-row-id') === 's-far')
+  menu = await openMenu(unpinnedRow)
+  await act(async () => { menu.querySelectorAll('.drs-menu-item')[1].click() })
+  assert.deepEqual(pinned, ['s-far'], 'an unpinned row offers 置顶会话, which pins it')
+  const pinnedRow = rowsIn('pinned')[0]
+  menu = await openMenu(pinnedRow)
+  assert.equal(menu.querySelectorAll('.drs-menu-item')[1].textContent, 'Unpin session',
+    'a pinned row offers 取消置顶 instead')
+  await act(async () => { menu.querySelectorAll('.drs-menu-item')[1].click() })
+  assert.equal(unpinned.length, 1, 'and the click unpins it')
+  assert.equal(unpinned[0], pinnedRow.getAttribute('data-drs-row-id'))
 
   await act(async () => {
     document.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }))
