@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.3',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.4',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -712,10 +712,38 @@ async function scenario(label, primitives) {
   assert.equal(headIn('pinned').getAttribute('aria-expanded'), 'false', 'and the header reports it')
   assert.equal(window.__DSH_RECENT_SESSIONS__.prefs().pinnedCollapsed, true, 'pinned fold state persisted')
 
+  // Unfolding rolls the body down instead of snapping it in: jsdom has neither the
+  // Web Animations API nor layout, so both are stubbed to observe the call the
+  // plugin makes (the same one a browser runs for real).
+  const animated = []
+  const realAnimate = window.Element.prototype.animate
+  window.Element.prototype.animate = function animate(keyframes, options) {
+    const animation = { onfinish: null, oncancel: null, cancel() {} }
+    animated.push({ node: this, keyframes, options, animation })
+    return animation
+  }
+  const realRect = window.Element.prototype.getBoundingClientRect
+  window.Element.prototype.getBoundingClientRect = function rect() {
+    return { width: 240, height: 170, top: 0, left: 0, right: 240, bottom: 170, x: 0, y: 0, toJSON() {} }
+  }
   await act(async () => { headIn('recent').click() })
+  // The roll starts on the frame after React puts the rows back.
+  await act(async () => { await new Promise(resolve => { window.setTimeout(resolve, 40) }) })
+  assert.ok(section('recent').querySelector('.drs-list') !== null, 'the recent section unfolds again')
+  assert.equal(animated.length, 1, 'and it rolls open rather than appearing outright')
+  assert.equal(animated[0].options.duration, 150, 'over 150ms')
+  assert.equal(animated[0].options.easing, 'cubic-bezier(.22, 1, .36, 1)', 'on a fast-settling curve')
+  assert.equal(animated[0].keyframes[0].maxHeight, '0px', 'starting from nothing')
+  assert.equal(animated[0].keyframes[1].maxHeight, '170px', 'growing to its own height')
+  assert.equal(animated[0].keyframes[0].opacity, 0, 'and fading in as it drops')
+  assert.equal(animated[0].node.classList.contains('drs-rolling'), true, 'the scrollbar stays out of the way while it runs')
+  animated[0].animation.onfinish()
+  assert.equal(animated[0].node.classList.contains('drs-rolling'), false, 'and the settling class comes off after the run')
+  window.Element.prototype.animate = realAnimate
+  window.Element.prototype.getBoundingClientRect = realRect
+
   await act(async () => { headIn('active').click() })
   await act(async () => { headIn('pinned').click() })
-  assert.ok(section('recent').querySelector('.drs-list') !== null, 'the recent section unfolds again')
   assert.ok(section('active').querySelector('.drs-list') !== null, 'the active section unfolds again')
   assert.ok(section('pinned').querySelector('.drs-list') !== null, 'the pinned section unfolds again')
 

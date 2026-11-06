@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.3';
+		const BUILD = 'recent-sessions/0.8.4';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -401,6 +401,9 @@ window.__ModuleLoader__.load({
 			// The row stops short of the list's own scrollbar, as the shipped rows do: the
 			// gutter keeps its air, and the hover card therefore opens outside it.
 			'.drs-list{padding-right:6px}',
+			// A section rolling open is briefly shorter than its content, so the
+			// scrollbar is kept out of the way for those 150ms rather than flashing.
+			'.drs-rolling{overflow:hidden !important}',
 			'.drs-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
 			'.drs-row:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:-2px}',
 			'.drs-row-current{background:var(--dsw-alias-interactive-bg-hover)}',
@@ -466,8 +469,7 @@ window.__ModuleLoader__.load({
 			'.drs-settings-number:focus{border-color:var(--dsw-alias-state-business-primary)}',
 			'.drs-settings-unit{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
 			'.drs-settings-version{margin:14px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
-			// The row context menu. Sized off the shipped menus' own rules — panel
-			// `padding:4px`, row `padding:5px 7px` with `gap:6px`, `radius-md` rows in a
+			// The row context menu. Sized off the shipped menus' own rules — panel			// `padding:4px`, row `padding:5px 7px` with `gap:6px`, `radius-md` rows in a
 			// `radius-lg` frame — so it reads at the same scale as the app's row menu.
 			// The surface is *solid* (measured off the shipped menu, #2b2c30..#313132)
 			// because the shipped translucency leans on a backdrop blur that a panel
@@ -1100,6 +1102,47 @@ window.__ModuleLoader__.load({
 		 */
 		const hiddenByFold = new Set();
 
+		/** How long a section takes to roll open, and the curve it rides. */
+		const ROLL_MS = 150;
+		const ROLL_EASE = 'cubic-bezier(.22, 1, .36, 1)';
+
+		/** Containers currently hidden here, so an unhide can roll open. */
+		const foldedContainers = new Set();
+
+		/**
+		 * Roll a section open the way the Codex sidebar does: the content drops into
+		 * place from under its header instead of snapping in. The element has already
+		 * been made visible, so its natural height is measurable; one WAAPI animation
+		 * grows it from nothing and lifts the 4px it starts out of, and nothing is
+		 * written inline, so the element's own row-window `max-height` takes over the
+		 * moment the animation ends.
+		 *
+		 * Three cases simply appear: an element that cannot be measured (jsdom), a
+		 * browser without the Web Animations API, and a reader who asked for reduced
+		 * motion.
+		 * @param node - the element that was just unhidden.
+		 */
+		function rollOpen(node) {
+			if (!(node instanceof HTMLElement)) return;
+			if (typeof node.animate !== 'function') return;
+			if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+			const height = node.getBoundingClientRect().height;
+			if (!(height > 0)) return;
+			// While it grows, the list is deliberately shorter than its content: hide
+			// the scrollbar for those 150ms instead of letting it flash in and out.
+			node.classList.add('drs-rolling');
+			const animation = node.animate(
+				[
+					{ maxHeight: '0px', opacity: 0, transform: 'translateY(-4px)' },
+					{ maxHeight: height + 'px', opacity: 1, transform: 'translateY(0)' },
+				],
+				{ duration: ROLL_MS, easing: ROLL_EASE },
+			);
+			const settle = () => { node.classList.remove('drs-rolling') };
+			animation.onfinish = settle;
+			animation.oncancel = settle;
+		}
+
 		/**
 		 * Put the fold away in the DOM: the header keeps its state, everything the
 		 * browser draws under it is hidden, and anything this plugin hid is shown
@@ -1121,6 +1164,9 @@ window.__ModuleLoader__.load({
 					hiddenByFold.delete(node);
 				}
 				header.setAttribute(FOLD_ATTR, 'open');
+				// Unfolding drops the list back in from under the header, the way the
+				// sections of this plugin and of the Codex sidebar do.
+				if (list instanceof HTMLElement && list.style.display !== 'none') rollOpen(list);
 				return;
 			}
 			header.setAttribute(FOLD_ATTR, 'collapsed');
@@ -1409,7 +1455,14 @@ window.__ModuleLoader__.load({
 					if (node === undefined || node === null) continue;
 					// The rail hides everything; a section the user hid in Settings hides
 					// only itself, so the remaining sections close up with their own 8px.
-					node.style.display = hidden || hiddenSections[list.id] === true ? 'none' : '';
+					const hide = hidden || hiddenSections[list.id] === true;
+					// Only a real hide→show rolls open: a re-render that leaves the
+					// section visible must not replay the animation.
+					const wasHidden = foldedContainers.has(node);
+					node.style.display = hide ? 'none' : '';
+					if (hide) foldedContainers.add(node);
+					else foldedContainers.delete(node);
+					if (wasHidden && !hide) rollOpen(node);
 					node.style.setProperty(list.rowsVar, String(windows[list.id]));
 				}
 			}, [containers, hidden, hiddenSections, rowCounts[0], rowCounts[1], rowCounts[2]]);			return containers;
@@ -2213,6 +2266,29 @@ window.__ModuleLoader__.load({
 			const now = useClock(wide);
 			// Sections the user hid in Settings; `hidden` is the stored map.
 			const hiddenSections = prefs.hidden ?? clampHidden(undefined);
+			// A section of this plugin folds by not rendering its rows, so the roll
+			// open is started on the frame after React has put them back — that is
+			// where the height to grow into exists. Only a real fold→open is animated.
+			const folds = {
+				pinned: prefs.pinnedCollapsed === true,
+				recent: prefs.collapsed === true,
+				active: prefs.activeCollapsed === true,
+			};
+			const foldKey = LIST_IDS.map(id => (folds[id] ? '1' : '0')).join('');
+			const lastFoldKey = React.useRef(foldKey);
+			React.useEffect(() => {
+				const previous = lastFoldKey.current;
+				lastFoldKey.current = foldKey;
+				if (previous === foldKey) return;
+				LIST_IDS.forEach((id, index) => {
+					if (previous[index] !== '1' || foldKey[index] === '1') return;
+					const node = containers[id];
+					if (node === null || node === undefined) return;
+					const roll = () => { rollOpen(node) };
+					if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(roll);
+					else roll();
+				});
+			}, [foldKey, containers]);
 			// The linger's memory and its expiry ticker: only a session that stopped
 			// qualifying schedules a timer, and it fires at the earliest expiry.
 			const lingerMs = (prefs.lingerSeconds ?? DEFAULT_LINGER_SECONDS) * 1000;
