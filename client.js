@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.4';
+		const BUILD = 'recent-sessions/0.8.5';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -1102,6 +1102,13 @@ window.__ModuleLoader__.load({
 		 */
 		const hiddenByFold = new Set();
 
+		/**
+		 * Whether the shipped region's list is hidden right now. The repair pass runs
+		 * every 1.5s and after every browser re-render with `folded === false`, so the
+		 * roll open must key on this transition — never on the state itself.
+		 */
+		let workspaceListFolded = false;
+
 		/** How long a section takes to roll open, and the curve it rides. */
 		const ROLL_MS = 150;
 		const ROLL_EASE = 'cubic-bezier(.22, 1, .36, 1)';
@@ -1148,8 +1155,10 @@ window.__ModuleLoader__.load({
 		 * browser draws under it is hidden, and anything this plugin hid is shown
 		 * again.
 		 * @param folded - whether the region's list must be hidden.
+		 * @param animate - whether an unfold may roll the list open; the rail path
+		 * passes `false`, because nothing is being unfolded there.
 		 */
-		function applyWorkspaceFold(folded) {
+		function applyWorkspaceFold(folded, animate = true) {
 			const region = workspaceRegion();
 			if (region === null) return;
 			const { header, list } = region;
@@ -1159,16 +1168,22 @@ window.__ModuleLoader__.load({
 			// section gap — so it goes away exactly while folded.
 			header.style.marginBottom = folded ? '0' : '';
 			if (!folded) {
+				const wasFolded = workspaceListFolded;
+				workspaceListFolded = false;
 				for (const node of [...hiddenByFold]) {
 					node.style.display = '';
 					hiddenByFold.delete(node);
 				}
 				header.setAttribute(FOLD_ATTR, 'open');
-				// Unfolding drops the list back in from under the header, the way the
-				// sections of this plugin and of the Codex sidebar do.
-				if (list instanceof HTMLElement && list.style.display !== 'none') rollOpen(list);
+				// Only a real fold→open rolls: the 1.5s repair pass and the browser's own
+				// re-renders also land here with `folded === false`, and replaying the
+				// drop on those is what made the section flash at random.
+				if (animate && wasFolded && list instanceof HTMLElement && list.style.display !== 'none') {
+					rollOpen(list);
+				}
 				return;
 			}
+			workspaceListFolded = true;
 			header.setAttribute(FOLD_ATTR, 'collapsed');
 			for (const node of [...hiddenByFold]) if (!node.isConnected) hiddenByFold.delete(node);
 			if (list instanceof HTMLElement && list.style.display !== 'none') {
@@ -1211,7 +1226,7 @@ window.__ModuleLoader__.load({
 			if (!enabled) {
 				// The rail's header carries no label, so nothing there is foldable —
 				// and nothing may stay hidden once the region is out of reach.
-				applyWorkspaceFold(false);
+				applyWorkspaceFold(false, false);
 				if (region.fold !== null) region.fold.remove();
 				region.header.removeAttribute(FOLD_ATTR);
 				region.header.removeAttribute('draggable');

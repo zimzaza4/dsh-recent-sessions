@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.4',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.5',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -778,6 +778,38 @@ async function scenario(label, primitives) {
   assert.equal(regionHeader().getAttribute('data-drs-workspaces-fold'), 'open', 'the chevron unfolds the region')
   assert.equal(regionList().style.display, '', 'and the shipped list is shown again')
   assert.equal(window.__DSH_RECENT_SESSIONS__.prefs().workspacesCollapsed, false, 'the state is persisted both ways')
+
+  // Unfolding rolls the shipped list open once — and the 1.5s repair pass, which
+  // also runs with "not folded", must never replay it (that flash was a real bug:
+  // any workspace store update, and even the timer, made the section drop again).
+  const regionRolls = []
+  const regionAnimate = window.Element.prototype.animate
+  window.Element.prototype.animate = function animate(keyframes, options) {
+    regionRolls.push({ node: this, keyframes, options, cls: this.className })
+    return { onfinish: null, oncancel: null, cancel() {} }
+  }
+  const regionRect = window.Element.prototype.getBoundingClientRect
+  window.Element.prototype.getBoundingClientRect = function rect() {
+    return { width: 240, height: 120, top: 0, left: 0, right: 240, bottom: 120, x: 0, y: 0, toJSON() {} }
+  }
+  // Only the shipped list's own rolls count here: unrelated sections that happen to
+  // become visible in the same pass are a different animation.
+  const listRolls = () => regionRolls.filter(roll => String(roll.cls).includes('wbListArea'))
+  const beforeFold = listRolls().length
+  await act(async () => { region().label.click() })
+  const afterFold = listRolls().length
+  await act(async () => { region().label.click() })
+  const afterUnfold = listRolls().length
+  assert.equal(afterFold, beforeFold, 'folding the region does not roll the list')
+  assert.equal(afterUnfold - afterFold, 1, 'a fold→open rolls the shipped list open exactly once')
+  assert.equal(listRolls().at(-1).options.duration, 150, 'over 150ms')
+  assert.equal(listRolls().at(-1).keyframes[0].maxHeight, '0px', 'growing from nothing')
+  await tick()
+  await tick()
+  await render(true)
+  assert.equal(listRolls().length, afterUnfold, 'and neither the repair timer nor a re-render replays it')
+  window.Element.prototype.animate = regionAnimate
+  window.Element.prototype.getBoundingClientRect = regionRect
 
   // React rebuilds the whole region on a workspace or search change: the injected
   // chevron and the hidden list both disappear, and the timer's next pass puts the
