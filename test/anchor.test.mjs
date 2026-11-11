@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.6',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.7',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })

@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.6';
+		const BUILD = 'recent-sessions/0.8.7';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -1133,26 +1133,53 @@ window.__ModuleLoader__.load({
 		 * browser without the Web Animations API, and a reader who asked for reduced
 		 * motion.
 		 * @param node - the element that was just unhidden.
+		 * @param defer - pin the element shut first and release it on the next frame.
+		 * The sections of this plugin fold by *not rendering* their rows, so they call
+		 * it from a layout effect, where the rows are in the DOM but not yet painted:
+		 * pinning them shut inline keeps that paint blank (no flash), and the release
+		 * on the next frame is also after React has finished the follow-up renders the
+		 * plugin's own preference event causes — starting any earlier means the browser
+		 * reaches its next paint with the 150ms already spent, and the roll is never
+		 * seen. The workspace list is hidden with `display` instead, so it is already
+		 * in one task with its own reveal and needs no deferral.
 		 */
-		function rollOpen(node) {
+		function rollOpen(node, defer = false) {
 			if (!(node instanceof HTMLElement)) return;
 			if (typeof node.animate !== 'function') return;
-			if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+			const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 			const height = node.getBoundingClientRect().height;
+			if (reduced) return;
 			if (!(height > 0)) return;
-			// While it grows, the list is deliberately shorter than its content: hide
-			// the scrollbar for those 150ms instead of letting it flash in and out.
-			node.classList.add('drs-rolling');
-			const animation = node.animate(
-				[
-					{ maxHeight: '0px', opacity: 0, transform: 'translateY(-4px)' },
-					{ maxHeight: height + 'px', opacity: 1, transform: 'translateY(0)' },
-				],
-				{ duration: ROLL_MS, easing: ROLL_EASE },
-			);
-			const settle = () => { node.classList.remove('drs-rolling') };
-			animation.onfinish = settle;
-			animation.oncancel = settle;
+			const start = () => {
+				// While it grows, the list is deliberately shorter than its content: hide
+				// the scrollbar instead of letting it flash in and out.
+				node.classList.add('drs-rolling');
+				const animation = node.animate(
+					[
+						{ maxHeight: '0px', opacity: 0, transform: 'translateY(-4px)' },
+						{ maxHeight: height + 'px', opacity: 1, transform: 'translateY(0)' },
+					],
+					{ duration: ROLL_MS, easing: ROLL_EASE },
+				);
+				const settle = () => {
+					node.classList.remove('drs-rolling');
+					// The roll ends at the element's own height, so releasing the pin is
+					// invisible — and its CSS (`max-height` from the row window) resumes.
+					node.style.maxHeight = '';
+					node.style.overflow = '';
+					node.style.opacity = '';
+				};
+				animation.onfinish = settle;
+				animation.oncancel = settle;
+			};
+			if (!defer || typeof window.requestAnimationFrame !== 'function') {
+				start();
+				return;
+			}
+			node.style.maxHeight = '0px';
+			node.style.overflow = 'hidden';
+			node.style.opacity = '0';
+			window.requestAnimationFrame(start);
 		}
 
 		/**
@@ -2310,7 +2337,7 @@ window.__ModuleLoader__.load({
 					if (previous[index] !== '1' || foldKey[index] === '1') return;
 					const node = containers[id];
 					if (node === null || node === undefined) return;
-					rollOpen(node);
+					rollOpen(node, true);
 				});
 			}, [foldKey, containers]);
 			// The linger's memory and its expiry ticker: only a session that stopped
