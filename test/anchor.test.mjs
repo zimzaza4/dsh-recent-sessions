@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.8',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.9',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -872,6 +872,8 @@ async function scenario(label, primitives) {
   stubRects()
   await act(async () => { drag('dragstart', headIn('active'), 520) })
   await act(async () => { drag('dragover', document, 10) })
+  // The line is redrawn at most once per frame.
+  await act(async () => { await new Promise(resolve => { window.setTimeout(resolve, 40) }) })
   assert.ok(line() !== null, 'the insertion line appears while a section is dragged')
   assert.equal(line().nextElementSibling, regionArea(), 'and sits where the section would land')
   await act(async () => { drag('drop', document, 10) })
@@ -885,6 +887,8 @@ async function scenario(label, primitives) {
   stubRects()
   await act(async () => { drag('dragstart', headIn('recent'), 400) })
   await act(async () => { drag('dragover', document, 900) })
+  // The line is redrawn at most once per frame.
+  await act(async () => { await new Promise(resolve => { window.setTimeout(resolve, 40) }) })
   assert.equal(line().nextElementSibling, spacer(),
     'an end-of-list drop draws the line under the last section, not at the bottom of the sidebar')
   await act(async () => { drag('dragend', document, 900) })

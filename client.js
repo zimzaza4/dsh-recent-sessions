@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.8';
+		const BUILD = 'recent-sessions/0.8.9';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -1369,9 +1369,20 @@ window.__ModuleLoader__.load({
 			const boundary = index >= rest.length
 				? (rest.length === 0 ? null : ensureSpacer(column))
 				: rest[index].node;
-			clearDrop();
-			if (boundary === null || boundary.parentElement !== column) return;
-			column.insertBefore(ensureDropLine(), boundary);
+			if (boundary === null || boundary.parentElement !== column) {
+				clearDrop();
+				return;
+			}
+			const line = ensureDropLine();
+			// The line is already drawn here. Re-inserting it on every dragover event
+			// would invalidate the whole sidebar for no visible change, which is what
+			// made dragging a section feel stuck.
+			if (line.parentElement === column && line.nextElementSibling === boundary) return;
+			column.insertBefore(line, boundary);
+			// A line left behind anywhere else (a reload mid-drag, a second copy) goes.
+			for (const stray of column.querySelectorAll('[' + LINE_ATTR + ']')) {
+				if (stray !== line) column.removeChild(stray);
+			}
 		}
 
 		/**
@@ -1420,21 +1431,32 @@ window.__ModuleLoader__.load({
 						transfer.setData('text/plain', id);
 					}
 				};
+				// No animation-frame throttle here: the sidebar's own renders can starve the
+				// frame loop for hundreds of milliseconds, and holding the line for a frame
+				// is exactly what made it feel late. The work per event is small instead —
+				// a pointer that has barely moved skips the measurement, and {@link
+				// markDrop} leaves the DOM alone when the line is already where it belongs.
+				let lastY = null;
 				const onDragOver = (event) => {
 					if (draggedSectionId === null) return;
 					event.preventDefault();
 					const transfer = event.dataTransfer;
 					if (transfer !== undefined && transfer !== null) transfer.dropEffect = 'move';
-					markDrop(dropIndexAt(event.clientY, draggedSectionId), draggedSectionId);
+					const y = event.clientY;
+					if (lastY !== null && Math.abs(y - lastY) < 3) return;
+					lastY = y;
+					markDrop(dropIndexAt(y, draggedSectionId), draggedSectionId);
 				};
 				const onDrop = (event) => {
 					if (draggedSectionId === null) return;
 					event.preventDefault();
+					lastY = null;
 					reorderSection(draggedSectionId, dropIndexAt(event.clientY, draggedSectionId));
 					draggedSectionId = null;
 					clearDrop();
 				};
 				const onDragEnd = () => {
+					lastY = null;
 					draggedSectionId = null;
 					clearDrop();
 				};
