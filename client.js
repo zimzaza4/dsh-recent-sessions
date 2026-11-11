@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.7';
+		const BUILD = 'recent-sessions/0.8.8';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -2337,7 +2337,12 @@ window.__ModuleLoader__.load({
 					if (previous[index] !== '1' || foldKey[index] === '1') return;
 					const node = containers[id];
 					if (node === null || node === undefined) return;
-					rollOpen(node, true);
+					// Only the list rolls: the header carries the section's own label, and
+					// pinning the whole section shut made that line blink as it was clipped
+					// away and grown back. The shipped 工作区 animates its list alone, which
+					// is why its label never flashed.
+					const list = node.querySelector('.drs-list');
+					if (list !== null) rollOpen(list, true);
 				});
 			}, [foldKey, containers]);
 			// The linger's memory and its expiry ticker: only a session that stopped

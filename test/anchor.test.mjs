@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.7',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.8',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -736,6 +736,11 @@ async function scenario(label, primitives) {
   assert.equal(animated[0].keyframes[0].maxHeight, '0px', 'starting from nothing')
   assert.equal(animated[0].keyframes[1].maxHeight, '170px', 'growing to its own height')
   assert.equal(animated[0].keyframes[0].opacity, 0, 'and fading in as it drops')
+  // The header must stay out of it: pinning the whole section clipped its own label,
+  // which read as the section title blinking on every unfold (the shipped 工作区
+  // animates its list alone, so its label never blinks).
+  assert.ok(String(animated[0].node.className).includes('drs-list'), 'the roll is on the list, not on the whole section')
+  assert.equal(animated[0].node.querySelector('.drs-head'), null, 'so the section label is never clipped by it')
   assert.equal(animated[0].node.classList.contains('drs-rolling'), true, 'the scrollbar stays out of the way while it runs')
   animated[0].animation.onfinish()
   assert.equal(animated[0].node.classList.contains('drs-rolling'), false, 'and the settling class comes off after the run')
