@@ -556,7 +556,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.5',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.6',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -927,6 +927,18 @@ async function scenario(label, primitives) {
   const sheet = document.querySelector('style[data-plugin-css]')
   assert.ok(sheet !== null && sheet.textContent.includes('.drs-title[data-scrolled]{text-overflow:clip}'),
     'a scrolled title drops its ellipsis — Chromium otherwise renders a bare "…" at the far edge')
+  // Left alignment with the shipped 工作区 column: its header pads by
+  // `--dsh-sidebar-row-padding` (12px) and its rows start their content at that same
+  // value through a 3px transparent inline border. Ours must use the same three vars
+  // rather than fixed pixels, or the sections sit 8px off.
+  const css = sheet.textContent
+  assert.ok(css.includes('.drs-head{') && css.includes('padding:0 0 0 var(--dsh-sidebar-row-padding,12px)'),
+    'the section header pads like the shipped one')
+  assert.ok(css.includes('border-inline:var(--dsh-sidebar-paint-inset,3px) solid transparent')
+    && css.includes('padding-inline-start:calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px))'),
+    'and a row starts its content at the same inset as a shipped row')
+  assert.ok(css.includes('margin:0 6px 0 var(--dsh-sidebar-label-gap,6px)'),
+    'with the shipped gap between the status slot and the title')
   window.requestAnimationFrame = realRequestFrame
   window.cancelAnimationFrame = realCancelFrame
 

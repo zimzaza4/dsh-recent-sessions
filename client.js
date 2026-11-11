@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.5';
+		const BUILD = 'recent-sessions/0.8.6';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -376,7 +376,7 @@ window.__ModuleLoader__.load({
 			// 4px gaps, 4px left padding, the same 4px out-dent on the right. The
 			// label grows to fill the row (there is no search slot here), which is
 			// what keeps it hard against the left edge under `flex-end`.
-			'.drs-head{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;height:36px;margin:2px -4px 4px 0;padding:0 0 0 4px;box-sizing:border-box;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;text-align:left;cursor:pointer}',
+			'.drs-head{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;height:36px;margin:2px -4px 4px 0;padding:0 0 0 var(--dsh-sidebar-row-padding,12px);box-sizing:border-box;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;text-align:left;cursor:pointer}',
 			'.drs-head:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:-2px}',
 			'.drs-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px}',
 			// The chevron is the shipped icon button: 28px box, sm radius, secondary
@@ -398,6 +398,11 @@ window.__ModuleLoader__.load({
 			'.drs-list{display:flex;flex-direction:column;gap:2px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));max-height:calc(var(--drs-visible-rows,'
 				+ DEFAULT_VISIBLE + ') * ' + ROW_PITCH_PX + 'px - 2px);overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}',
 			'.drs-row{display:flex;align-items:center;width:100%;height:32px;padding:0 8px;box-sizing:border-box;flex:none;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;text-align:left;cursor:pointer}',
+			// The row's text lands where a shipped workspace row's does: the shipped rows
+			// carry a 3px transparent inline border and start their content at
+			// `--dsh-sidebar-row-padding` (12px), so the same two values are applied here
+			// — the pill still spans the full row, only the content moves in.
+			'.drs-row{border-inline:var(--dsh-sidebar-paint-inset,3px) solid transparent;padding-inline-start:calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px))}',
 			// The row stops short of the list's own scrollbar, as the shipped rows do: the
 			// gutter keeps its air, and the hover card therefore opens outside it.
 			'.drs-list{padding-right:6px}',
@@ -423,7 +428,7 @@ window.__ModuleLoader__.load({
 			'.drs-hover-time{color:#cfd3d6;font-size:12px;line-height:16px}',
 			'.drs-hover-status{color:#adb2b8;display:flex;align-items:center;gap:8px;font-size:12px;line-height:20px}',
 			'.drs-slot{flex:none;width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}',
-			'.drs-title{flex:1 1 0;min-width:0;margin:0 6px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:20px}',
+			'.drs-title{flex:1 1 0;min-width:0;margin:0 6px 0 var(--dsh-sidebar-label-gap,6px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:20px}',
 			// The shipped rows' marquee fades: the title clips its own text, and these
 			// masks soften whichever edge still has text behind it.
 			'.drs-title[data-scrolled]{mask-image:linear-gradient(90deg,transparent,#000 12px)}',
@@ -2282,8 +2287,11 @@ window.__ModuleLoader__.load({
 			// Sections the user hid in Settings; `hidden` is the stored map.
 			const hiddenSections = prefs.hidden ?? clampHidden(undefined);
 			// A section of this plugin folds by not rendering its rows, so the roll
-			// open is started on the frame after React has put them back — that is
-			// where the height to grow into exists. Only a real fold→open is animated.
+			// open has to start in the *layout* phase: a passive effect runs after the
+			// browser has already painted the rows at full height, and the animation
+			// snapping them back to nothing is the flash that made our sections blink
+			// where the shipped 工作区 (which hides and shows in one task) did not.
+			// Only a real fold→open is animated.
 			const folds = {
 				pinned: prefs.pinnedCollapsed === true,
 				recent: prefs.collapsed === true,
@@ -2291,7 +2299,10 @@ window.__ModuleLoader__.load({
 			};
 			const foldKey = LIST_IDS.map(id => (folds[id] ? '1' : '0')).join('');
 			const lastFoldKey = React.useRef(foldKey);
-			React.useEffect(() => {
+			// Layout phase, not a passive effect, and no animation frame: the rows exist
+			// and have been laid out here but the browser has not painted them yet, so
+			// the first painted frame is already the zero-height start of the roll.
+			React.useLayoutEffect(() => {
 				const previous = lastFoldKey.current;
 				lastFoldKey.current = foldKey;
 				if (previous === foldKey) return;
@@ -2299,9 +2310,7 @@ window.__ModuleLoader__.load({
 					if (previous[index] !== '1' || foldKey[index] === '1') return;
 					const node = containers[id];
 					if (node === null || node === undefined) return;
-					const roll = () => { rollOpen(node) };
-					if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(roll);
-					else roll();
+					rollOpen(node);
 				});
 			}, [foldKey, containers]);
 			// The linger's memory and its expiry ticker: only a session that stopped
