@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
 		const ANCHOR_MS = 1_500;
 
 		/** Bundle marker; surfaced on the debug handle and in the block's tooltip. */
-		const BUILD = 'recent-sessions/0.8.9';
+		const BUILD = 'recent-sessions/0.8.10';
 
 		/** Simplified Chinese copy (the key-set source of truth). */
 		const ZH = {
@@ -372,6 +372,11 @@ window.__ModuleLoader__.load({
 			// vertical rhythm lives in the headers and in the region's own margins
 			// (see {@link placeContainers}), which keeps every gap at 8px.
 			'.drs{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding);margin:2px calc(-1 * var(--dsh-sidebar-inline-padding)) 0 -4px;padding-left:4px;padding-right:var(--dsh-session-list-edge-inset);display:flex;flex-direction:column;box-sizing:border-box}',
+			// 0.2.2 hosts the sections inside the browsing cell itself, and that cell
+			// already carries the sidebar's edge inset — the block stays flush there
+			// instead of bleeding past it a second time.
+			'.drs-in-region{margin:0;padding-left:0;padding-right:0;width:100%;min-width:0}',
+			'.drs-in-region .drs-head{margin-right:0}',
 			// Header geometry copied from the shipped `.sectionHeader`: 36px row,
 			// 4px gaps, 4px left padding, the same 4px out-dent on the right. The
 			// label grows to fill the row (there is no search slot here), which is
@@ -805,17 +810,28 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * The sidebar's workspace region wrapper: the parent of the
-		 * `sidebar.workspaces` slot. The block lives directly under it, so 工作区
-		 * reads first and 最近会话 / 活跃会话 follow — the same order the sections
-		 * are draggable into.
-		 * @param column - the sidebar column element.
-		 * @returns the region wrapper, or `null` until the shell drew it.
+		 * Where the section boxes live, and which node stands for the shipped
+		 * 工作区 section among them.
+		 *
+		 * 0.2.2 moved the `sidebar.workspaces` slot out of the column into its own
+		 * flex cell (`regionArea`) inside the scrolling column area. The sections
+		 * belong in that cell, next to the slot host, so 工作区 and the plugin's
+		 * lists keep scrolling together. Older sidebars put the slot's wrapper
+		 * straight into the column, so there the sections are siblings of the
+		 * wrapper.
+		 * @returns `{ host, anchor, legacy }`, or `null` before the shell mounted.
 		 */
-		function workspaceArea(column) {
-			const slot = column.querySelector('[data-slot="sidebar.workspaces"]');
-			const area = slot === null ? null : slot.parentElement;
-			return area !== null && area.parentElement === column ? area : null;
+		function sectionAnchor() {
+			if (typeof document === 'undefined') return null;
+			const slot = document.querySelector('[data-slot="sidebar.workspaces"]');
+			if (!(slot instanceof HTMLElement)) return null;
+			const wrapper = slot.parentElement;
+			if (!(wrapper instanceof HTMLElement)) return null;
+			const column = sidebarColumn();
+			if (column !== null && wrapper.parentElement === column) {
+				return { host: column, anchor: wrapper, legacy: true };
+			}
+			return { host: wrapper, anchor: slot, legacy: false };
 		}
 
 		/**
@@ -836,19 +852,18 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * The three sections as they currently sit in the column, top to bottom:
-		 * `{ id, node }` for the shipped region and for each placed container. Only
-		 * the section boxes matter here — they are square-cornered, so an inset
-		 * shadow reads as a straight line across the whole block.
+		 * The sections as they currently sit in their host, top to bottom:
+		 * `{ id, node }` for the shipped 工作区 anchor and for each placed
+		 * container. Only the section boxes matter here — they are square-cornered,
+		 * so an inset shadow reads as a straight line across the whole block.
 		 * @returns the sections in DOM order.
 		 */
 		function sectionElements() {
-			const column = sidebarColumn();
-			if (column === null) return [];
-			const region = workspaceArea(column);
+			const spot = sectionAnchor();
+			if (spot === null) return [];
 			const sections = [];
-			for (const node of column.children) {
-				if (node === region) sections.push({ id: 'workspaces', node });
+			for (const node of spot.host.children) {
+				if (node === spot.anchor) sections.push({ id: 'workspaces', node });
 				else if (node.hasAttribute(CONTAINER_ATTR)) {
 					sections.push({ id: node.getAttribute(CONTAINER_ATTR), node });
 				}
@@ -857,18 +872,19 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * Whether the column already lists the three sections in `order`; anything
-		 * else (a container still unplaced, a foreign order) needs a placement pass.
-		 * @param column - the sidebar column element.
-		 * @param region - the shipped workspace region wrapper.
+		 * Whether the host already lists the sections in `order`; anything else (a
+		 * container still unplaced, a foreign order) needs a placement pass.
+		 * @param spot - the section host and the 工作区 anchor.
 		 * @param order - the desired order.
 		 * @returns whether the DOM already agrees.
 		 */
-		function placementMatches(column, region, order) {
+		function placementMatches(spot, order) {
 			const present = [];
-			for (const node of column.children) {
-				if (node === region) present.push('workspaces');
-				else if (node.hasAttribute(CONTAINER_ATTR)) present.push(node.getAttribute(CONTAINER_ATTR));
+			for (const node of spot.host.children) {
+				if (node === spot.anchor) present.push('workspaces');
+				else if (node.hasAttribute(CONTAINER_ATTR)) {
+					present.push(node.getAttribute(CONTAINER_ATTR));
+				}
 			}
 			return present.length === order.length && present.every((id, index) => id === order[index]);
 		}
@@ -907,50 +923,66 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * Bring the column into the state the preferences describe: every section
-		 * container placed around the shipped region in the stored order, the tail
-		 * spacer under the last of them, the region hugging its own content instead
-		 * of eating the free space, and the footer at the bottom. Re-running this is
-		 * idempotent and cheap; it is what repairs the placement if React ever
-		 * rebuilt the column.
+		 * Bring the section host into the state the preferences describe: every
+		 * container placed around the shipped 工作区 anchor in the stored order.
+		 *
+		 * In the 0.2.2 layout the host is the region cell inside the scrolling
+		 * column area, so there is no free space to take with a tail spacer and the
+		 * footer lives outside the scrollport — only the older column layout keeps
+		 * those two moves. Re-running this is idempotent and cheap; it repairs the
+		 * placement if React ever rebuilt the host.
 		 * @returns one entry per {@link LIST_IDS} id; each is `null` while the shell
 		 * is absent.
 		 */
 		function placeContainers() {
-			const column = sidebarColumn();
-			const region = column === null ? null : workspaceArea(column);
-			if (region === null) {
+			const spot = sectionAnchor();
+			if (spot === null) {
 				const absent = {};
 				for (const id of LIST_IDS) absent[id] = null;
 				return absent;
 			}
+			const { host, anchor, legacy } = spot;
 			const containers = {};
-			for (const id of LIST_IDS) containers[id] = ensureContainer(id);
-			ensureSpacer(column);
-			region.style.flex = '0 1 auto';
+			for (const id of LIST_IDS) {
+				const node = ensureContainer(id);
+				// A section keeps its own height: as a plain flex item it would default
+				// to `flex-shrink: 1`, and the last section in the order is the one that
+				// gets squeezed when the sidebar runs out of room — which cut its measured
+				// height and left its unfold animation with nothing to grow.
+				node.style.flex = '0 0 auto';
+				node.style.minWidth = '0';
+				// In the 0.2.2 layout the host cell already carries the sidebar's edge
+				// insets, so the box must not bleed past them a second time.
+				node.classList.toggle('drs-in-region', !legacy);
+				containers[id] = node;
+			}
 			// A 工作区 the user hid in Settings is taken out of the flow entirely, so the
 			// remaining sections close up around it.
-			region.style.display = readPrefs().hidden.workspaces === true ? 'none' : '';
-			// Every section gap is 8px: our sections carry their own 4px trailing
-			// margin inside the container (the shipped header's). The region carries
-			// it in its own box instead, so it reads the same wherever it is dragged.
-			region.style.marginTop = '2px';
-			region.style.marginBottom = '4px';
-			const foot = sidebarFooter(column);
-			if (foot !== null && foot !== region) foot.style.marginTop = 'auto';
+			anchor.style.display = readPrefs().hidden.workspaces === true ? 'none' : '';
+			if (legacy) {
+				ensureSpacer(host);
+				anchor.style.flex = '0 1 auto';
+				// Every section gap is 8px: our sections carry their own 4px trailing
+				// margin inside the container (the shipped header's). The region carries
+				// it in its own box instead, so it reads the same wherever it is dragged.
+				anchor.style.marginTop = '2px';
+				anchor.style.marginBottom = '4px';
+				const foot = sidebarFooter(host);
+				if (foot !== null && foot !== anchor) foot.style.marginTop = 'auto';
+			}
 			const order = readPrefs().order;
-			if (!placementMatches(column, region, order)) {
-				const regionIndex = order.indexOf('workspaces');
-				let previous = region;
+			if (!placementMatches(spot, order)) {
+				const anchorIndex = order.indexOf('workspaces');
+				let previous = anchor;
 				order.forEach((id, index) => {
 					if (id === 'workspaces') return;
 					const node = containers[id];
-					if (index < regionIndex) {
+					if (index < anchorIndex) {
 						// Successive inserts before the same anchor keep the call order.
-						column.insertBefore(node, region);
+						host.insertBefore(node, anchor);
 						return;
 					}
-					column.insertBefore(node, previous.nextSibling);
+					host.insertBefore(node, previous.nextSibling);
 					previous = node;
 				});
 			}
@@ -1121,65 +1153,97 @@ window.__ModuleLoader__.load({
 		/** Containers currently hidden here, so an unhide can roll open. */
 		const foldedContainers = new Set();
 
+		/** Heights measured when a section's list was pinned shut, keyed by that list. */
+		const pinnedHeights = new WeakMap();
+
 		/**
-		 * Roll a section open the way the Codex sidebar does: the content drops into
-		 * place from under its header instead of snapping in. The element has already
-		 * been made visible, so its natural height is measurable; one WAAPI animation
-		 * grows it from nothing and lifts the 4px it starts out of, and nothing is
-		 * written inline, so the element's own row-window `max-height` takes over the
-		 * moment the animation ends.
-		 *
-		 * Three cases simply appear: an element that cannot be measured (jsdom), a
-		 * browser without the Web Animations API, and a reader who asked for reduced
-		 * motion.
-		 * @param node - the element that was just unhidden.
-		 * @param defer - pin the element shut first and release it on the next frame.
-		 * The sections of this plugin fold by *not rendering* their rows, so they call
-		 * it from a layout effect, where the rows are in the DOM but not yet painted:
-		 * pinning them shut inline keeps that paint blank (no flash), and the release
-		 * on the next frame is also after React has finished the follow-up renders the
-		 * plugin's own preference event causes — starting any earlier means the browser
-		 * reaches its next paint with the 150ms already spent, and the roll is never
-		 * seen. The workspace list is hidden with `display` instead, so it is already
-		 * in one task with its own reveal and needs no deferral.
+		 * Measure an element and pin it shut, so the paint that follows shows nothing.
+		 * The section lists call this from a **layout** effect — a passive one runs after
+		 * the browser has already painted the rows at full height, which is the flash
+		 * these sections once had.
+		 * @param node - the list that is about to roll open.
+		 * @returns whether it was pinned.
 		 */
-		function rollOpen(node, defer = false) {
-			if (!(node instanceof HTMLElement)) return;
-			if (typeof node.animate !== 'function') return;
-			const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-			const height = node.getBoundingClientRect().height;
-			if (reduced) return;
-			if (!(height > 0)) return;
-			const start = () => {
-				// While it grows, the list is deliberately shorter than its content: hide
-				// the scrollbar instead of letting it flash in and out.
-				node.classList.add('drs-rolling');
-				const animation = node.animate(
-					[
-						{ maxHeight: '0px', opacity: 0, transform: 'translateY(-4px)' },
-						{ maxHeight: height + 'px', opacity: 1, transform: 'translateY(0)' },
-					],
-					{ duration: ROLL_MS, easing: ROLL_EASE },
-				);
-				const settle = () => {
-					node.classList.remove('drs-rolling');
-					// The roll ends at the element's own height, so releasing the pin is
-					// invisible — and its CSS (`max-height` from the row window) resumes.
-					node.style.maxHeight = '';
-					node.style.overflow = '';
-					node.style.opacity = '';
-				};
-				animation.onfinish = settle;
-				animation.oncancel = settle;
-			};
-			if (!defer || typeof window.requestAnimationFrame !== 'function') {
-				start();
-				return;
-			}
+		function pinForRoll(node) {
+			const height = rollHeight(node);
+			if (height === null) return false;
+			pinnedHeights.set(node, height);
 			node.style.maxHeight = '0px';
 			node.style.overflow = 'hidden';
 			node.style.opacity = '0';
-			window.requestAnimationFrame(start);
+			return true;
+		}
+
+		/**
+		 * Play the roll for a list {@link pinForRoll} pinned, from the height measured
+		 * then. Called from a **passive** effect, i.e. after the paint the pin kept
+		 * blank, which is the same moment the shipped 工作区 list starts its own roll.
+		 * @param node - the pinned list.
+		 */
+		function playPinnedRoll(node) {
+			const height = pinnedHeights.get(node);
+			pinnedHeights.delete(node);
+			if (height === undefined) return;
+			startRoll(node, height);
+		}
+
+		/**
+		 * The height a roll should grow into: the visible box, or — for a box that was
+		 * squeezed or not measured yet — its content height, without which a section
+		 * short of room got no roll at all.
+		 * @param node - the element to measure.
+		 * @returns the height in px, or `null` when it cannot be animated at all.
+		 */
+		function rollHeight(node) {
+			if (!(node instanceof HTMLElement)) return null;
+			if (typeof node.animate !== 'function') return null;
+			if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+			const measured = node.getBoundingClientRect().height;
+			const height = measured > 1 ? measured : node.scrollHeight;
+			return height > 0 ? height : null;
+		}
+
+		/**
+		 * Roll a section open the way the Codex sidebar does: the content drops into
+		 * place from under its header instead of snapping in. One WAAPI animation grows
+		 * it from nothing and lifts the 4px it starts out of; nothing is written inline
+		 * afterwards, so the element's own row-window `max-height` resumes the moment it
+		 * ends. An element that cannot be measured (jsdom), a browser without the Web
+		 * Animations API, and a reader who asked for reduced motion all simply appear.
+		 * @param node - the element that was just exposed.
+		 */
+		function rollOpen(node) {
+			const height = rollHeight(node);
+			if (height === null) return;
+			startRoll(node, height);
+		}
+
+		/**
+		 * Start the animation itself, then release whatever the caller pinned.
+		 * @param node - the element to animate.
+		 * @param height - the height to grow into.
+		 */
+		function startRoll(node, height) {
+			// While it grows, the list is deliberately shorter than its content: hide
+			// the scrollbar instead of letting it flash in and out.
+			node.classList.add('drs-rolling');
+			const animation = node.animate(
+				[
+					{ maxHeight: '0px', opacity: 0, transform: 'translateY(-4px)' },
+					{ maxHeight: height + 'px', opacity: 1, transform: 'translateY(0)' },
+				],
+				{ duration: ROLL_MS, easing: ROLL_EASE },
+			);
+			const settle = () => {
+				node.classList.remove('drs-rolling');
+				// The roll ends at the element's own height, so releasing the pin is
+				// invisible — and its CSS (`max-height` from the row window) resumes.
+				node.style.maxHeight = '';
+				node.style.overflow = '';
+				node.style.opacity = '';
+			};
+			animation.onfinish = settle;
+			animation.oncancel = settle;
 		}
 
 		/**
@@ -1354,22 +1418,23 @@ window.__ModuleLoader__.load({
 
 		/**
 		 * Draw the insertion line at the boundary a drag is aiming at: immediately
-		 * before the section it precedes, or immediately before the tail spacer when
-		 * the section goes last. Both are in the column's own flow, so the line ends
-		 * up exactly where the section will land, straight and full width, and — for
-		 * the end of the list — right under the last section rather than at the
-		 * bottom of the sidebar or off the end of a long workspace list.
+		 * before the section it precedes, or at the end of the section host when the
+		 * section goes last. The line lives in the host's own flow, so it ends up
+		 * exactly where the section will land, straight and full width.
 		 * @param index - the target index among the sections the user is not dragging.
 		 * @param draggedId - the section being dragged.
 		 */
 		function markDrop(index, draggedId) {
-			const column = sidebarColumn();
-			if (column === null) return;
+			const spot = sectionAnchor();
+			if (spot === null) return;
+			const { host, legacy } = spot;
 			const rest = sectionElements().filter(section => section.id !== draggedId);
+			// The old column layout has a tail spacer that carries the end-of-list
+			// boundary; the 0.2.2 cell ends with the cell itself.
 			const boundary = index >= rest.length
-				? (rest.length === 0 ? null : ensureSpacer(column))
+				? (legacy ? (rest.length === 0 ? null : ensureSpacer(host)) : null)
 				: rest[index].node;
-			if (boundary === null || boundary.parentElement !== column) {
+			if (boundary !== null && boundary.parentElement !== host) {
 				clearDrop();
 				return;
 			}
@@ -1377,11 +1442,11 @@ window.__ModuleLoader__.load({
 			// The line is already drawn here. Re-inserting it on every dragover event
 			// would invalidate the whole sidebar for no visible change, which is what
 			// made dragging a section feel stuck.
-			if (line.parentElement === column && line.nextElementSibling === boundary) return;
-			column.insertBefore(line, boundary);
+			if (line.parentElement === host && line.nextElementSibling === boundary) return;
+			host.insertBefore(line, boundary);
 			// A line left behind anywhere else (a reload mid-drag, a second copy) goes.
-			for (const stray of column.querySelectorAll('[' + LINE_ATTR + ']')) {
-				if (stray !== line) column.removeChild(stray);
+			for (const stray of host.querySelectorAll('[' + LINE_ATTR + ']')) {
+				if (stray !== line) host.removeChild(stray);
 			}
 		}
 
@@ -1497,9 +1562,8 @@ window.__ModuleLoader__.load({
 			const [containers, setContainers] = React.useState(empty);
 			// A hidden 工作区 leaves the column at once, not on the next repair pass.
 			React.useEffect(() => {
-				const column = sidebarColumn();
-				const region = column === null ? null : workspaceArea(column);
-				if (region !== null) region.style.display = hiddenSections.workspaces === true ? 'none' : '';
+				const spot = sidebarColumn() === null ? null : sectionAnchor();
+				if (spot !== null) spot.anchor.style.display = hiddenSections.workspaces === true ? 'none' : '';
 			}, [containers, hiddenSections]);
 			React.useEffect(() => {
 				let alive = true;
@@ -2348,12 +2412,17 @@ window.__ModuleLoader__.load({
 			};
 			const foldKey = LIST_IDS.map(id => (folds[id] ? '1' : '0')).join('');
 			const lastFoldKey = React.useRef(foldKey);
-			// Layout phase, not a passive effect, and no animation frame: the rows exist
-			// and have been laid out here but the browser has not painted them yet, so
-			// the first painted frame is already the zero-height start of the roll.
+			// Five lists the unfold has to roll, collected in the layout phase below.
+			const pendingRolls = React.useRef([]);
+			// Phase one, layout: the rows exist and are laid out here, but nothing has been
+			// painted yet — so pinning the list shut is what keeps that paint blank. The
+			// animation itself starts in the passive effect below, which is the moment the
+			// shipped 工作区 list starts its own roll; that ordering is what made this work
+			// before, and starting in the layout phase instead left the roll unseen.
 			React.useLayoutEffect(() => {
 				const previous = lastFoldKey.current;
 				lastFoldKey.current = foldKey;
+				pendingRolls.current = [];
 				if (previous === foldKey) return;
 				LIST_IDS.forEach((id, index) => {
 					if (previous[index] !== '1' || foldKey[index] === '1') return;
@@ -2364,9 +2433,14 @@ window.__ModuleLoader__.load({
 					// away and grown back. The shipped 工作区 animates its list alone, which
 					// is why its label never flashed.
 					const list = node.querySelector('.drs-list');
-					if (list !== null) rollOpen(list, true);
+					if (list !== null && pinForRoll(list)) pendingRolls.current.push(list);
 				});
 			}, [foldKey, containers]);
+			React.useEffect(() => {
+				const pinnedLists = pendingRolls.current;
+				pendingRolls.current = [];
+				for (const list of pinnedLists) playPinnedRoll(list);
+			}, [foldKey]);
 			// The linger's memory and its expiry ticker: only a session that stopped
 			// qualifying schedules a timer, and it fires at the earliest expiry.
 			const lingerMs = (prefs.lingerSeconds ?? DEFAULT_LINGER_SECONDS) * 1000;
@@ -2477,17 +2551,16 @@ window.__ModuleLoader__.load({
 		 */
 		function restoreSidebarChrome() {
 			clearDrop();
-			const column = sidebarColumn();
-			if (column === null) return;
-			const region = workspaceArea(column);
-			if (region !== null) {
-				region.style.flex = '';
-				region.style.display = '';
-				region.style.marginTop = '';
-				region.style.marginBottom = '';
+			const spot = sidebarColumn() === null ? null : sectionAnchor();
+			if (spot === null) return;
+			spot.anchor.style.display = '';
+			if (spot.legacy) {
+				spot.anchor.style.flex = '';
+				spot.anchor.style.marginTop = '';
+				spot.anchor.style.marginBottom = '';
+				const foot = sidebarFooter(spot.host);
+				if (foot !== null) foot.style.marginTop = '';
 			}
-			const foot = sidebarFooter(column);
-			if (foot !== null) foot.style.marginTop = '';
 			for (const node of [document.querySelector('[' + SPACER_ATTR + ']'), ...LIST_IDS.map(ensureContainer)]) {
 				if (node !== null && node.parentElement !== null) node.parentElement.removeChild(node);
 			}

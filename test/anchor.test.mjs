@@ -241,8 +241,10 @@ const statuses = new Map([
  * Run the whole scenario against one module table.
  * @param label - scenario name for the failure message.
  * @param primitives - the `ui-primitives` value the module table serves, or `undefined` for the fallback arm.
+ * @param layout - `column` for the pre-0.2.2 sidebar, `cell` for the 0.2.2 region cell.
  */
-async function scenario(label, primitives) {
+async function scenario(label, primitives, layout = 'column') {
+  const cell = layout === 'cell'
   window.localStorage.removeItem('dsh-recent-sessions')
 
   // A pristine shipped region: no scenario may inherit the fold the previous one left.
@@ -383,24 +385,47 @@ async function scenario(label, primitives) {
     if (node.hasAttribute('data-drs-sidebar-spacer')) return 'spacer'
     return node.className
   })
+  /** The node the sections are placed around: the region wrapper, or the slot host in a 0.2.2 cell. */
+  const workspaceAnchorEl = () => (cell ? document.querySelector('[data-slot="sidebar.workspaces"]') : regionArea())
+  /** The section ids in DOM order, whichever layout is mounted. */
+  const idsInOrder = () => window.__DSH_RECENT_SESSIONS__.sections()
 
   // ── placement ─────────────────────────────────────────────────────────────
   await render(true)
   assert.ok(containerOf('recent') !== null, 'the recent container is injected')
   assert.ok(containerOf('active') !== null, 'the active container is injected')
   assert.ok(containerOf('pinned') !== null, 'the pinned container is injected')
-  assert.deepEqual(columnOrder(), [
-    'logoRow', 'newSession', 'panelList', 'regionArea', 'block:pinned', 'block:recent', 'block:active', 'spacer', 'footArea',
-  ], 'the sections sit under the 工作区 region, with the tail spacer before the footer')
+  if (cell) {
+    // The 0.2.2 sidebar puts the browsing area in its own cell inside the
+    // scrolling column, so the sections live in that cell and never take free
+    // space from the footer.
+    const cellOrder = () => [...regionArea().children].map(node => {
+      if (node.hasAttribute('data-dsh-recent-sessions')) return `block:${node.getAttribute('data-dsh-recent-sessions')}`
+      if (node.getAttribute('data-slot') === 'sidebar.workspaces') return 'workspaces'
+      return node.className
+    })
+    assert.deepEqual(cellOrder(), ['workspaces', 'block:pinned', 'block:recent', 'block:active'],
+      'the sections sit around the slot host inside the region cell')
+    for (const id of ['pinned', 'recent', 'active']) {
+      assert.ok(containerOf(id).classList.contains('drs-in-region'), `${id} uses the in-region box`)
+      assert.equal(containerOf(id).style.flex, '0 0 auto', `${id} keeps its own height`)
+    }
+    assert.equal(spacer(), null, 'the cell layout needs no tail spacer')
+    assert.equal(column.querySelector('.footArea').style.marginTop, '', 'and the footer keeps its shipped spacing')
+  } else {
+    assert.deepEqual(columnOrder(), [
+      'logoRow', 'newSession', 'panelList', 'regionArea', 'block:pinned', 'block:recent', 'block:active', 'spacer', 'footArea',
+    ], 'the sections sit under the 工作区 region, with the tail spacer before the footer')
+    assert.equal(spacer().previousElementSibling, containerOf('active'), 'and the tail spacer follows the last section')
+    // The region hugs its content and the tail takes the free space, so the three
+    // sections sit together near the top instead of at the bottom of the sidebar.
+    assert.equal(regionArea().style.flex, '0 1 auto', 'the workspace region stops growing')
+    assert.equal(regionArea().style.marginBottom, '4px', 'and carries the same trailing 4px every other section has')
+    assert.equal(column.querySelector('.footArea').style.marginTop, 'auto', 'while the footer keeps the bottom')
+  }
   assert.equal(seat.textContent, '', 'the footer seat itself stays empty')
   assert.equal(containerOf('pinned').nextElementSibling, containerOf('recent'), 'the recent section follows the pinned one')
   assert.equal(containerOf('recent').nextElementSibling, containerOf('active'), 'the active section follows the recent one')
-  assert.equal(spacer().previousElementSibling, containerOf('active'), 'and the tail spacer follows the last section')
-  // The region hugs its content and the tail takes the free space, so the three
-  // sections sit together near the top instead of at the bottom of the sidebar.
-  assert.equal(regionArea().style.flex, '0 1 auto', 'the workspace region stops growing')
-  assert.equal(regionArea().style.marginBottom, '4px', 'and carries the same trailing 4px every other section has')
-  assert.equal(column.querySelector('.footArea').style.marginTop, 'auto', 'while the footer keeps the bottom')
 
   // ── the recent list ───────────────────────────────────────────────────────
   assert.deepEqual(titlesIn('recent').slice(0, 7), [
@@ -537,10 +562,11 @@ async function scenario(label, primitives) {
 
   await act(async () => { switches[0].click() })
   assert.equal(window.__DSH_RECENT_SESSIONS__.prefs().hidden.workspaces, true, 'the shipped region can be hidden too')
-  assert.equal(regionArea().style.display, 'none', 'and it leaves the column')
+  const workspaceAnchor = () => (cell ? document.querySelector('[data-slot="sidebar.workspaces"]') : regionArea())
+  assert.equal(workspaceAnchor().style.display, 'none', 'and it leaves the flow')
   await act(async () => { switches[0].click() })
-  assert.equal(regionArea().style.display, '', 'and comes back when switched on')
-  assert.equal(columnOrder()[3], 'regionArea', 'in its old place')
+  assert.equal(workspaceAnchor().style.display, '', 'and comes back when switched on')
+  if (!cell) assert.equal(columnOrder()[3], 'regionArea', 'in its old place')
 
   // The number field is a controlled input, and jsdom never delivers React's
   // synthetic change for one. What is checked is the field's binding to the store
@@ -556,7 +582,7 @@ async function scenario(label, primitives) {
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(0) })
   await renderSettings()
   assert.equal(number().value, '0', 'zero is allowed, and turns the linger off')
-  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.9',
+  assert.equal(settingsHost.querySelector('.drs-settings-version').textContent, 'Version 0.8.10',
     'the page names the build that is live')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.linger(30) })
   await act(async () => { settingsRoot.unmount() })
@@ -840,7 +866,7 @@ async function scenario(label, primitives) {
   const stubRects = () => {
     let top = 0
     for (const id of window.__DSH_RECENT_SESSIONS__.sections()) {
-      const node = id === 'workspaces' ? regionArea() : containerOf(id)
+      const node = id === 'workspaces' ? workspaceAnchorEl() : containerOf(id)
       const height = id === 'workspaces' ? 200 : 120
       node.getBoundingClientRect = () => rect(top, height)
       top += height
@@ -856,17 +882,15 @@ async function scenario(label, primitives) {
 
   // The order preference drives the placement: any permutation of the four wins.
   await act(async () => { window.__DSH_RECENT_SESSIONS__.order(['recent', 'workspaces', 'active', 'pinned']) })
-  assert.deepEqual(columnOrder(), [
-    'logoRow', 'newSession', 'panelList', 'block:recent', 'regionArea', 'block:active', 'block:pinned', 'spacer', 'footArea',
-  ], 'the recent section can sit before the workspace region')
+  assert.deepEqual(idsInOrder(), ['recent', 'workspaces', 'active', 'pinned'],
+    'the recent section can sit before the workspace region')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.order(['active', 'recent', 'workspaces', 'pinned']) })
-  assert.deepEqual(columnOrder(), [
-    'logoRow', 'newSession', 'panelList', 'block:active', 'block:recent', 'regionArea', 'block:pinned', 'spacer', 'footArea',
-  ], 'and the workspace region can sit ahead of the pinned one, with the tail spacer still under the last section')
+  assert.deepEqual(idsInOrder(), ['active', 'recent', 'workspaces', 'pinned'],
+    'and the workspace region can sit ahead of the pinned one')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.order(['recent', 'recent', 'nope', 'pinned']) })
   assert.deepEqual(window.__DSH_RECENT_SESSIONS__.prefs().order, ['workspaces', 'pinned', 'recent', 'active'],
     'a duplicated or foreign order falls back to the default')
-  assert.deepEqual(columnOrder(), DEFAULT_ORDER, 'and the sections go back to it')
+  assert.deepEqual(idsInOrder(), ['workspaces', 'pinned', 'recent', 'active'], 'and the sections go back to it')
 
   // Dragging a header moves its section: to the top, then to the end of the list.
   stubRects()
@@ -875,28 +899,31 @@ async function scenario(label, primitives) {
   // The line is redrawn at most once per frame.
   await act(async () => { await new Promise(resolve => { window.setTimeout(resolve, 40) }) })
   assert.ok(line() !== null, 'the insertion line appears while a section is dragged')
-  assert.equal(line().nextElementSibling, regionArea(), 'and sits where the section would land')
+  assert.equal(line().nextElementSibling, workspaceAnchorEl(), 'and sits where the section would land')
   await act(async () => { drag('drop', document, 10) })
   assert.equal(line(), null, 'the line goes away with the drop')
   assert.deepEqual(window.__DSH_RECENT_SESSIONS__.prefs().order, ['active', 'workspaces', 'pinned', 'recent'],
     'the dropped section takes the place the line was drawn at')
-  assert.deepEqual(columnOrder(), [
-    'logoRow', 'newSession', 'panelList', 'block:active', 'regionArea', 'block:pinned', 'block:recent', 'spacer', 'footArea',
-  ], 'and the column follows the preference')
+  assert.deepEqual(idsInOrder(), ['active', 'workspaces', 'pinned', 'recent'],
+    'and the placement follows the preference')
 
   stubRects()
   await act(async () => { drag('dragstart', headIn('recent'), 400) })
   await act(async () => { drag('dragover', document, 900) })
   // The line is redrawn at most once per frame.
   await act(async () => { await new Promise(resolve => { window.setTimeout(resolve, 40) }) })
-  assert.equal(line().nextElementSibling, spacer(),
-    'an end-of-list drop draws the line under the last section, not at the bottom of the sidebar')
+  if (cell) {
+    assert.equal(line().nextElementSibling, null, 'an end-of-list drop draws the line under the last section')
+  } else {
+    assert.equal(line().nextElementSibling, spacer(),
+      'an end-of-list drop draws the line under the last section, not at the bottom of the sidebar')
+  }
   await act(async () => { drag('dragend', document, 900) })
   assert.equal(line(), null, 'a drag that ends without a drop takes the line away')
   assert.deepEqual(window.__DSH_RECENT_SESSIONS__.prefs().order, ['active', 'workspaces', 'pinned', 'recent'],
     'and leaves the order alone')
   await act(async () => { window.__DSH_RECENT_SESSIONS__.order(['workspaces', 'pinned', 'recent', 'active']) })
-  assert.deepEqual(columnOrder(), DEFAULT_ORDER, 'the default order is restored for the checks that follow')
+  assert.deepEqual(idsInOrder(), ['workspaces', 'pinned', 'recent', 'active'], 'the default order is restored for the checks that follow')
 
   // ── the row behaviours the shipped workspace rows have ────────────────────
   // Hover marquee: the title clips its own text, so crawling is `scrollLeft` plus
@@ -1021,9 +1048,17 @@ async function scenario(label, primitives) {
 
   containerOf('recent').remove()
   assert.ok(window.__DSH_RECENT_SESSIONS__.container() !== null, 'a removed container is re-injected')
-  assert.deepEqual(columnOrder(), [
-    'logoRow', 'newSession', 'panelList', 'regionArea', 'block:pinned', 'block:recent', 'block:active', 'spacer', 'footArea',
-  ], 'and re-injected in the same gap, under the workspace region')
+  if (cell) {
+    assert.deepEqual([...regionArea().children].map(node => {
+      if (node.hasAttribute('data-dsh-recent-sessions')) return `block:${node.getAttribute('data-dsh-recent-sessions')}`
+      if (node.getAttribute('data-slot') === 'sidebar.workspaces') return 'workspaces'
+      return node.className
+    }), ['workspaces', 'block:pinned', 'block:recent', 'block:active'], 'and re-injected inside the region cell')
+  } else {
+    assert.deepEqual(columnOrder(), [
+      'logoRow', 'newSession', 'panelList', 'regionArea', 'block:pinned', 'block:recent', 'block:active', 'spacer', 'footArea',
+    ], 'and re-injected in the same gap, under the workspace region')
+  }
 
   await act(async () => { root.unmount() })
   assert.equal(foldButton(), null, 'unmounting (the bundle was disabled) takes the chevron back out')
@@ -1035,9 +1070,31 @@ async function scenario(label, primitives) {
   console.log(`recent-sessions (${label}): placement, listing, active ranking, locale, limits, open, fold, workspace fold, drag, rail, repair — OK`)
 }
 
+/**
+ * Rebuild the shipped skeleton the way 0.2.2 does: the browsing cell sits in its
+ * own scrolling column area instead of directly in the sidebar column.
+ */
+function useCellLayout() {
+  const column = document.querySelector('[data-slot="sidebar"]').firstElementChild
+  const area = document.querySelector('[data-slot="sidebar.workspaces"]').parentElement
+  const scrollRegion = document.createElement('div')
+  scrollRegion.className = 'scrollRegion'
+  const scrollArea = document.createElement('div')
+  scrollArea.className = 'scrollArea'
+  column.insertBefore(scrollRegion, area)
+  scrollRegion.appendChild(scrollArea)
+  scrollArea.appendChild(area)
+}
+
 await scenario('shared ui-primitives', {
   relativeTime: sharedRelativeTime,
   StateDot: stubStateDot,
   HoverCard: stubHoverCard,
 })
 await scenario('without ui-primitives', undefined)
+useCellLayout()
+await scenario('0.2.2 cell layout', {
+  relativeTime: sharedRelativeTime,
+  StateDot: stubStateDot,
+  HoverCard: stubHoverCard,
+}, 'cell')
